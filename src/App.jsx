@@ -1,165 +1,150 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Search, 
+  Upload, 
+  Building2, 
+  TrendingUp, 
+  Users, 
+  DollarSign, 
+  BarChart3, 
+  Filter, 
+  X, 
+  ChevronRight, 
+  AlertCircle, 
+  CheckCircle2,
+  Database
+} from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// --- ICONOS (Componentes funcionales para evitar errores de React) ---
-const BuildingIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M16 10h.01"/><path d="M8 14h.01"/><path d="M16 14h.01"/></svg>
-);
-const SearchIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-);
-const CloudIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19c2.5 0 4.5-2 4.5-4.5 0-2.3-1.7-4.2-4-4.5-1.1-2.6-3.7-4.5-6.5-4.5-3.6 0-6.5 2.9-6.5 6.5 0 .3 0 .7.1 1C3.1 13.5 2 15.1 2 17c0 2.8 2.2 5 5 5h10.5"/></svg>
-);
-const UploadIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-);
-const XIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-);
-const ChartIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
-);
-
-// --- INICIALIZACIÓN ---
+// --- CONFIGURACIÓN E INICIALIZACIÓN ---
 const getFirebaseConfig = () => {
   if (typeof __firebase_config !== 'undefined' && __firebase_config) {
     try { return JSON.parse(__firebase_config); } catch (e) { return null; }
   }
-  return null;
+  try {
+    const env = import.meta.env.VITE_FIREBASE_CONFIG;
+    return typeof env === 'string' ? JSON.parse(env) : env;
+  } catch (e) { return null; }
 };
 
 const firebaseConfig = getFirebaseConfig();
 const app = firebaseConfig ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
-
-// Saneamiento de AppId (Regla 1: Ruta estricta de 5 segmentos para colecciones)
-const rawAppId = typeof __app_id !== 'undefined' ? __app_id : "bud_advisors_prod";
+// REGLA 1: Saneamiento de App ID para evitar errores de ruta en Firestore
+const rawAppId = typeof __app_id !== 'undefined' ? __app_id : "bud-advisors-intelligence";
 const appId = rawAppId.replace(/[^a-zA-Z0-9]/g, '_');
 
+// --- UTILIDADES ---
 const formatCurrency = (v) => (!v || isNaN(v)) ? '-' : new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v);
 
 export default function App() {
+  // --- ESTADO ---
   const [data, setData] = useState([]);
   const [user, setUser] = useState(null);
-  const [status, setStatus] = useState({ type: 'info', msg: 'Estableciendo conexión...' });
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [status, setStatus] = useState({ type: 'info', msg: 'Iniciando sistema...' });
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [selectedSubcategory, setSelectedSubcategory] = useState('Todas');
   const [selectedCompany, setSelectedCompany] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [loading, setLoading] = useState(true);
 
-  // 1. Autenticación (Regla 3)
+  // --- 1. AUTENTICACIÓN (REGLA 3) ---
   useEffect(() => {
     if (!auth) {
-      setStatus({ type: 'error', msg: 'Error: Configuración de Firebase no detectada.' });
+      setStatus({ type: 'error', msg: 'Configuración Firebase no detectada. Revisa Netlify.' });
       setLoading(false);
       return;
     }
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (e) { 
-        setStatus({ type: 'error', msg: `Fallo de conexión: ${e.message}` }); 
-        setLoading(false);
-      }
-    };
-    initAuth();
-    return onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      if (u) setStatus({ type: 'success', msg: 'SISTEMA ONLINE - Cloud Database Conectada' });
-    });
+    signInAnonymously(auth).catch(err => setStatus({ type: 'error', msg: `Error Auth: ${err.message}` }));
+    return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // 2. Sincronización (Regla 1 y 3)
+  // --- 2. SINCRONIZACIÓN DE DATOS (REGLA 1 Y 3) ---
   useEffect(() => {
-    if (!user || !db) return;
-    
-    // Ruta Colección (5 segmentos): artifacts / appId / public / data / companies
-    const q = collection(db, 'artifacts', appId, 'public', 'data', 'companies');
-    
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const docs = snap.docs.map(d => d.data());
-      // Ordenar por facturación descendente
-      docs.sort((a, b) => (Number(b['IMPORTEN NETO DE LA CIFRA DE NEGOCIO']) || 0) - (Number(a['IMPORTEN NETO DE LA CIFRA DE NEGOCIO']) || 0));
-      setData(docs);
-      setLoading(false);
-    }, (err) => {
-      setLoading(false);
-      if (err.code === 'permission-denied') {
-        setStatus({ type: 'error', msg: 'PERMISOS DENEGADOS: Actualiza las Reglas en Firebase Console.' });
-      } else {
-        setStatus({ type: 'error', msg: `Error Firestore: ${err.message}` });
-      }
-    });
+    if (!db || !user) return;
 
+    // Ruta de 5 segmentos para la colección
+    const companiesRef = collection(db, 'artifacts', appId, 'public', 'data', 'companies');
+    
+    const unsubscribe = onSnapshot(companiesRef, 
+      (snap) => {
+        const docs = snap.docs.map(d => d.data());
+        // Ordenar por facturación descendente por defecto
+        docs.sort((a, b) => (Number(b['IMPORTEN NETO DE LA CIFRA DE NEGOCIO']) || 0) - (Number(a['IMPORTEN NETO DE LA CIFRA DE NEGOCIO']) || 0));
+        setData(docs);
+        setLoading(false);
+        setStatus({ type: 'success', msg: 'Sistema Online - Datos Sincronizados' });
+      },
+      (err) => {
+        setLoading(false);
+        setStatus({ type: 'error', msg: err.code === 'permission-denied' ? 'Acceso Denegado: Revisa las Reglas en Firebase Console.' : err.message });
+      }
+    );
     return () => unsubscribe();
   }, [user]);
 
-  // 3. Carga masiva CSV
+  // --- 3. LÓGICA DE CARGA ---
   const handleUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !db || !user) return;
+    
     setUploading(true);
-    setStatus({ type: 'info', msg: 'Actualizando base de datos central...' });
+    setStatus({ type: 'info', msg: 'Procesando archivo y subiendo a la nube...' });
+    
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
         const text = ev.target.result;
         const lines = text.split('\n').filter(l => l.trim());
-        const headers = lines[0].split(',').map(h => h.trim());
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
         
         let count = 0;
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',');
           const obj = {};
           headers.forEach((h, idx) => {
-            let val = values[idx]?.trim();
+            let val = values[idx]?.trim().replace(/^"|"$/g, '');
             if (val && !isNaN(val.replace(',', '.'))) val = parseFloat(val.replace(',', '.'));
             obj[h] = val;
           });
           
           if (obj['CIF EMPRESA']) {
-            const id = String(obj['CIF EMPRESA']).replace(/[^a-zA-Z0-9]/g, '');
-            // Ruta Documento (6 segmentos): artifacts/appId/public/data/companies/id
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', id), obj);
+            const docId = String(obj['CIF EMPRESA']).replace(/[^a-zA-Z0-9]/g, '');
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companies', docId), obj);
             count++;
           }
         }
-        setStatus({ type: 'success', msg: `¡Éxito! ${count} registros sincronizados.` });
-      } catch (err) { setStatus({ type: 'error', msg: `Error: ${err.message}` }); }
-      finally { setUploading(false); }
+        setStatus({ type: 'success', msg: `¡Éxito! ${count} agencias guardadas en la nube.` });
+      } catch (err) {
+        setStatus({ type: 'error', msg: `Fallo en la carga: ${err.message}` });
+      } finally {
+        setUploading(false);
+      }
     };
     reader.readAsText(file);
   };
 
-  // --- LÓGICA DE NEGOCIO ---
-  const statsByCategory = useMemo(() => {
-    const counts = {};
-    data.forEach(c => {
-      if (c['CATEGORÍA']) counts[c['CATEGORÍA']] = (counts[c['CATEGORÍA']] || 0) + 1;
-    });
-    return counts;
-  }, [data]);
+  // --- LÓGICA DE NEGOCIO / MÉTRICAS ---
+  const categories = useMemo(() => ['Todas', ...new Set(data.map(c => c['CATEGORÍA']).filter(Boolean))], [data]);
+  const subcategories = useMemo(() => ['Todas', ...new Set(data.filter(c => selectedCategory === 'Todas' || c['CATEGORÍA'] === selectedCategory).map(c => c['SUBCATEGORÍA']).filter(Boolean))], [data, selectedCategory]);
 
-  const totalRevenue2024 = useMemo(() => {
-    return data
-      .filter(c => String(c['EJERCICIO']) === '2024')
-      .reduce((sum, c) => sum + (Number(c['IMPORTEN NETO DE LA CIFRA DE NEGOCIO']) || 0), 0);
+  const stats = useMemo(() => {
+    const catCounts = {};
+    let totalRev2024 = 0;
+    data.forEach(c => {
+      if (c['CATEGORÍA']) catCounts[c['CATEGORÍA']] = (catCounts[c['CATEGORÍA']] || 0) + 1;
+      if (String(c['EJERCICIO']) === '2024') {
+        totalRev2024 += (Number(c['IMPORTEN NETO DE LA CIFRA DE NEGOCIO']) || 0);
+      }
+    });
+    return { catCounts, totalRev2024 };
   }, [data]);
 
   const topTen = useMemo(() => data.slice(0, 10), [data]);
-
-  const categories = useMemo(() => ['Todas', ...new Set(data.map(c => c['CATEGORÍA']).filter(Boolean))], [data]);
-  const subcategories = useMemo(() => ['Todas', ...new Set(data.filter(c => selectedCategory === 'Todas' || c['CATEGORÍA'] === selectedCategory).map(c => c['SUBCATEGORÍA']).filter(Boolean))], [data, selectedCategory]);
 
   const filtered = useMemo(() => {
     return data.filter(c => {
@@ -174,157 +159,278 @@ export default function App() {
   }, [data, searchTerm, selectedCategory, selectedSubcategory]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* NAVBAR */}
-      <nav className="bg-black text-white p-6 border-b-4 border-yellow-400 flex justify-between items-center sticky top-0 z-50 shadow-2xl">
-        <div className="flex items-center gap-3">
-          <BuildingIcon />
-          <div className="flex flex-col">
-            <span className="font-black text-xl tracking-tighter uppercase leading-none italic">BUD <span className="text-yellow-400 font-black">ADVISORS</span></span>
-            <span className="text-[10px] tracking-widest text-gray-400 uppercase font-bold mt-1">Intelligence Unit</span>
+    <div className="min-h-screen bg-[#f8f9fa] text-[#1a1a1a] font-sans selection:bg-yellow-200">
+      {/* HEADER PRINCIPAL */}
+      <nav className="bg-black text-white p-6 border-b-4 border-yellow-400 sticky top-0 z-50 shadow-2xl">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="p-2 bg-yellow-400 rounded-sm">
+              <Building2 className="text-black w-6 h-6" />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-black text-2xl tracking-tighter uppercase leading-none">BUD <span className="text-yellow-400">ADVISORS</span></span>
+              <span className="text-[10px] tracking-[0.3em] text-gray-400 font-bold uppercase mt-1">Intelligence Unit</span>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <label className={`bg-yellow-400 hover:bg-yellow-300 text-black px-6 py-2.5 font-black text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2 shadow-lg ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
-            <UploadIcon />
-            {uploading ? 'SINCRONIZANDO...' : 'ACTUALIZAR DATABASE'}
+          <label className={`bg-yellow-400 hover:bg-yellow-300 text-black px-6 py-3 font-black text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2 shadow-lg hover:scale-105 active:scale-95 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+            <Upload className="w-4 h-4" />
+            {uploading ? 'PROCESANDO...' : 'CARGAR CSV'}
             <input type="file" onChange={handleUpload} className="hidden" accept=".csv" disabled={uploading} />
           </label>
         </div>
       </nav>
 
-      {/* MONITOR DE ESTADO */}
-      <div className={`p-2.5 text-[10px] font-black uppercase tracking-[0.2em] text-center text-white ${status.type === 'error' ? 'bg-red-600' : status.type === 'success' ? 'bg-green-600' : 'bg-blue-600'}`}>
-        {status.msg}
+      {/* BARRA DE ESTADO */}
+      <div className={`p-2 text-[10px] font-black uppercase tracking-[0.2em] text-center border-b transition-colors duration-500 ${
+        status.type === 'error' ? 'bg-red-600 text-white' : 
+        status.type === 'success' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
+      }`}>
+        <div className="flex items-center justify-center gap-2">
+          {status.type === 'error' ? <AlertCircle className="w-3 h-3" /> : <Database className="w-3 h-3" />}
+          {status.msg}
+        </div>
       </div>
 
       <main className="max-w-7xl mx-auto p-8">
-        {/* PANEL DE ESTADÍSTICAS */}
+        
+        {/* PANEL DE INDICADORES (MÉTRICAS SOLICITADAS) */}
         <section className="mb-12">
-            <div className="flex items-center gap-2 mb-6 border-b-2 border-black pb-2">
-                <ChartIcon />
-                <h2 className="text-sm font-black uppercase tracking-widest">Dashboard de Mercado</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-black text-white p-6 border-l-8 border-yellow-400 shadow-xl">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Entidades Cargadas</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-5xl font-black leading-none">{data.length}</span>
+                <span className="text-xs font-bold text-yellow-400 uppercase">Agencias</span>
+              </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                <div className="bg-black text-white p-4 border-l-4 border-yellow-400 shadow-sm">
-                    <span className="text-[9px] font-bold text-gray-400 uppercase block mb-1">Agencias Totales</span>
-                    <span className="text-3xl font-black">{data.length}</span>
-                </div>
-                <div className="bg-yellow-400 text-black p-4 border-l-4 border-black shadow-md">
-                    <span className="text-[9px] font-black uppercase block mb-1">Volumen 2024</span>
-                    <span className="text-lg font-black">{formatCurrency(totalRevenue2024)}</span>
-                </div>
-                {Object.entries(statsByCategory).slice(0, 4).map(([cat, count]) => (
-                    <div key={cat} className="bg-white p-4 border border-gray-200 border-l-4 border-black shadow-sm">
-                        <span className="text-[9px] font-bold text-gray-400 uppercase block mb-1 truncate">{cat}</span>
-                        <span className="text-2xl font-black">{count}</span>
-                    </div>
-                ))}
+            <div className="bg-white p-6 border-l-8 border-black shadow-lg">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Facturación Total 2024</span>
+              <span className="text-2xl font-black block text-green-600">{formatCurrency(stats.totalRev2024)}</span>
             </div>
+            {Object.entries(stats.catCounts).slice(0, 2).map(([cat, count]) => (
+              <div key={cat} className="bg-white p-6 border-l-8 border-gray-200 shadow-lg">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2 truncate">{cat}</span>
+                <span className="text-3xl font-black block leading-none">{count} agencias</span>
+              </div>
+            ))}
+          </div>
         </section>
 
-        {/* TOP 10 */}
-        <section className="mb-12">
-            <div className="flex items-center gap-2 mb-6 border-b-2 border-black pb-2">
-                <span className="text-yellow-500 font-black">★</span>
-                <h2 className="text-sm font-black uppercase tracking-widest">Top 10 por Facturación</h2>
-            </div>
-            <div className="flex gap-4 overflow-x-auto pb-6 scrollbar-hide">
-                {topTen.map((c, i) => (
-                    <div key={i} onClick={() => setSelectedCompany(c)} className="min-w-[280px] bg-white border-2 border-gray-100 p-6 hover:border-yellow-400 transition-all cursor-pointer shadow-sm relative group">
-                        <div className="absolute top-0 right-0 bg-yellow-400 text-black font-black px-2 py-1 text-[10px]">#{i+1}</div>
-                        <span className="text-[8px] font-black bg-black text-white px-1.5 py-0.5 uppercase tracking-widest mb-2 inline-block">{c['CATEGORÍA']}</span>
-                        <h3 className="font-black uppercase truncate text-sm mb-1 group-hover:text-yellow-600">{c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}</h3>
-                        <p className="text-[10px] font-black text-gray-700">{formatCurrency(c['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'])}</p>
-                    </div>
-                ))}
-            </div>
+        {/* RANKING TOP 10 */}
+        <section className="mb-16">
+          <div className="flex items-center gap-3 mb-6 border-b-4 border-black pb-2">
+            <TrendingUp className="w-6 h-6 text-yellow-500" />
+            <h2 className="text-xl font-black uppercase tracking-tighter italic">Liderazgo de Mercado (Top 10)</h2>
+          </div>
+          <div className="flex gap-6 overflow-x-auto pb-6 snap-x">
+            {topTen.map((c, i) => (
+              <div 
+                key={i} 
+                onClick={() => setSelectedCompany(c)}
+                className="min-w-[300px] bg-white border-2 border-gray-100 p-6 shadow-md snap-center hover:border-yellow-400 transition-all cursor-pointer group relative"
+              >
+                <div className="absolute -top-3 -left-3 w-8 h-8 bg-black text-yellow-400 flex items-center justify-center font-black text-xs rounded-full border-2 border-yellow-400">
+                  {i + 1}
+                </div>
+                <span className="text-[9px] font-black bg-gray-100 text-gray-600 px-2 py-0.5 uppercase tracking-widest mb-3 inline-block rounded-sm">
+                  {c['CATEGORÍA']}
+                </span>
+                <h3 className="font-black uppercase truncate text-lg mb-2 group-hover:text-yellow-600 transition-colors">
+                  {c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}
+                </h3>
+                <div className="flex justify-between items-end border-t pt-4">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Ventas</span>
+                  <span className="font-black text-xl">{formatCurrency(c['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'])}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
-        {/* BUSQUEDA Y FILTROS */}
-        <div className="bg-white p-8 shadow-xl mb-12 border-t-8 border-black flex flex-col gap-8">
+        {/* BUSCADOR Y FILTROS INTEGRADOS */}
+        <section className="bg-white p-10 shadow-2xl mb-12 border-t-[10px] border-black rounded-sm flex flex-col gap-8">
           <div className="flex items-center gap-4 border-b-2 border-gray-100 pb-4 group">
-            <SearchIcon />
+            <Search className="text-gray-300 group-focus-within:text-yellow-500 transition-colors w-8 h-8" />
             <input 
-              className="w-full outline-none font-bold text-xl placeholder-gray-200 bg-transparent"
-              placeholder="Nombre, CIF o Acrónimo..."
+              className="w-full outline-none font-black text-2xl placeholder-gray-200 bg-transparent uppercase"
+              placeholder="Buscar por Nombre, CIF o Acrónimo..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sector / Categoría</span>
-              <select className="p-3 bg-gray-50 border-2 border-transparent focus:border-yellow-400 outline-none font-bold text-sm cursor-pointer" value={selectedCategory} onChange={(e) => {setSelectedCategory(e.target.value); setSelectedSubcategory('Todas');}}>
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] flex items-center gap-2">
+                <Filter className="w-3 h-3" /> Categoría de Negocio
+              </span>
+              <select 
+                className="w-full p-4 bg-gray-50 border-2 border-transparent focus:border-yellow-400 outline-none font-bold text-sm cursor-pointer transition-all"
+                value={selectedCategory} 
+                onChange={(e) => {setSelectedCategory(e.target.value); setSelectedSubcategory('Todas');}}
+              >
                 {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>
             </div>
             <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Subcategoría</span>
-              <select className="p-3 bg-gray-50 border-2 border-transparent focus:border-yellow-400 outline-none font-bold text-sm cursor-pointer" value={selectedSubcategory} onChange={(e) => setSelectedSubcategory(e.target.value)} disabled={selectedCategory === 'Todas'}>
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] flex items-center gap-2">
+                <Filter className="w-3 h-3" /> Especialidad
+              </span>
+              <select 
+                className="w-full p-4 bg-gray-50 border-2 border-transparent focus:border-yellow-400 outline-none font-bold text-sm cursor-pointer transition-all disabled:opacity-30"
+                value={selectedSubcategory} 
+                onChange={(e) => setSelectedSubcategory(e.target.value)} 
+                disabled={selectedCategory === 'Todas'}
+              >
                 {subcategories.map(sub => <option key={sub} value={sub}>{sub}</option>)}
               </select>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* LISTADO PRINCIPAL */}
+        {/* LISTADO DE RESULTADOS */}
+        <div className="flex justify-between items-end mb-6 border-b-2 border-black pb-2">
+          <h2 className="text-sm font-black uppercase tracking-widest italic">Base de Inteligencia BUD ({filtered.length})</h2>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Ejercicios Consolidados</span>
+        </div>
+        
         {loading ? (
-            <div className="text-center py-20 font-black text-gray-300 animate-pulse uppercase tracking-widest">Sincronizando con la nube...</div>
+          <div className="text-center py-32 animate-pulse flex flex-col items-center gap-4">
+            <Database className="w-12 h-12 text-gray-200" />
+            <span className="font-black text-gray-300 uppercase tracking-[0.4em]">Sincronizando con la nube de Google</span>
+          </div>
         ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {filtered.map((c, i) => (
-                <div key={i} onClick={() => setSelectedCompany(c)} className="bg-white border-2 border-gray-100 p-8 hover:shadow-2xl hover:-translate-y-2 transition-all cursor-pointer border-t-4 hover:border-t-yellow-400 group relative">
-                <span className="text-[9px] font-black bg-black text-white px-2 py-0.5 uppercase tracking-widest mb-3 inline-block">{String(c['CATEGORÍA'] || 'EMPRESA')}</span>
-                <h3 className="text-xl font-black text-black group-hover:text-yellow-600 transition-colors uppercase truncate mb-1">{String(c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL'])}</h3>
-                <p className="text-gray-400 text-xs font-mono mb-6">{String(c['CIF EMPRESA'])}</p>
+              <div 
+                key={i} 
+                onClick={() => setSelectedCompany(c)} 
+                className="bg-white border-2 border-gray-100 p-8 hover:shadow-2xl transition-all cursor-pointer border-t-4 hover:border-t-yellow-400 group relative"
+              >
+                <span className="text-[9px] font-black bg-black text-white px-2 py-0.5 uppercase tracking-widest mb-4 inline-block">
+                  {c['CATEGORÍA'] || 'SIN CATEGORÍA'}
+                </span>
+                <h3 className="text-xl font-black text-black group-hover:text-yellow-600 transition-colors uppercase truncate mb-1">
+                  {c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}
+                </h3>
+                <p className="text-gray-400 text-[10px] font-mono mb-8 flex items-center gap-2">
+                  <Database className="w-3 h-3" /> {c['CIF EMPRESA']}
+                </p>
                 <div className="flex justify-between items-baseline border-t pt-4">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase">Facturación</span>
-                    <span className="font-black text-lg tabular-nums">{formatCurrency(c['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'])}</span>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Cifra Negocio</span>
+                  <span className="font-black text-2xl tabular-nums">{formatCurrency(c['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'])}</span>
                 </div>
-                </div>
+              </div>
             ))}
-            </div>
+          </div>
+        )}
+
+        {filtered.length === 0 && !loading && (
+          <div className="text-center py-32 bg-white border-4 border-dashed border-gray-100 rounded-lg">
+            <Search className="w-12 h-12 text-gray-100 mx-auto mb-4" />
+            <p className="font-black text-gray-300 uppercase tracking-widest text-lg">No se han encontrado coincidencias</p>
+          </div>
         )}
       </main>
 
-      {/* MODAL DETALLE */}
+      {/* MODAL DETALLE EXPEDIENTE (SOLICITADO) */}
       {selectedCompany && (
-        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-5xl max-h-[92vh] overflow-y-auto shadow-2xl border-t-[12px] border-yellow-400">
-            <div className="p-10 md:p-16 text-slate-900">
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white w-full max-w-6xl my-auto shadow-2xl border-t-[12px] border-yellow-400 animate-in fade-in zoom-in duration-300">
+            <div className="p-8 md:p-16">
               <div className="flex justify-between items-start mb-12">
                 <div>
-                  <div className="flex items-center gap-2 mb-2 text-yellow-600 font-black text-[10px] uppercase tracking-widest"><CloudIcon /> EXPEDIENTE ESTRATÉGICO</div>
-                  <h2 className="text-4xl md:text-5xl font-black tracking-tighter uppercase leading-tight mb-2">{String(selectedCompany['DENOMINACIÓN SOCIAL'])}</h2>
-                  <p className="text-gray-400 font-mono text-sm">CIF: {String(selectedCompany['CIF EMPRESA'])} | {String(selectedCompany['CATEGORÍA'])}</p>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="bg-black text-yellow-400 text-[10px] font-black px-3 py-1 uppercase tracking-[0.2em]">Expediente de Inteligencia</span>
+                    <TrendingUp className="w-4 h-4 text-yellow-500" />
+                  </div>
+                  <h2 className="text-4xl md:text-7xl font-black tracking-tighter uppercase leading-none mb-4">
+                    {selectedCompany['DENOMINACIÓN SOCIAL']}
+                  </h2>
+                  <p className="text-gray-400 font-mono text-sm flex gap-6">
+                    <span>CIF: <span className="text-black font-bold">{selectedCompany['CIF EMPRESA']}</span></span>
+                    <span>SECTOR: <span className="text-black font-bold uppercase">{selectedCompany['CATEGORÍA']}</span></span>
+                    <span>EJERCICIO: <span className="text-yellow-600 font-bold italic">{selectedCompany['EJERCICIO']}</span></span>
+                  </p>
                 </div>
-                <button onClick={() => setSelectedCompany(null)} className="p-3 border-2 border-gray-100 rounded-full hover:bg-gray-100 transition-colors shadow-sm"><XIcon /></button>
+                <button 
+                  onClick={() => setSelectedCompany(null)} 
+                  className="p-4 border-2 border-gray-100 rounded-full hover:bg-gray-100 transition-all text-black hover:rotate-90"
+                >
+                  <X className="w-8 h-8" />
+                </button>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
-                <div className="space-y-6">
-                  <h4 className="text-lg font-black uppercase border-b-4 border-black pb-2">Cuenta de Resultados</h4>
-                  <div className="space-y-3 font-medium text-sm">
-                    <div className="flex justify-between p-3 bg-gray-50 font-bold border-l-4 border-black"><span>(+) Ventas Netas</span><span>{formatCurrency(selectedCompany['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'])}</span></div>
-                    <div className="flex justify-between p-3 text-red-600 italic"><span>(-) Gastos de Personal</span><span>{formatCurrency(selectedCompany['GASTOS DE PERSONAL'])}</span></div>
-                    <div className="flex justify-between p-3 bg-yellow-400/10 font-black text-lg border-l-4 border-yellow-400"><span>(=) EBITDA</span><span className="text-yellow-600">{formatCurrency(selectedCompany['EBITDA'])}</span></div>
-                    <div className="flex justify-between p-3 border-t-4 border-black font-black text-2xl mt-4 bg-gray-50"><span>Resultado Neto</span><span>{formatCurrency(selectedCompany['RESULTADO DEL EJERCICIO'])}</span></div>
+                {/* ESTRUCTURA P&L DETALLADA */}
+                <div className="space-y-8">
+                  <h4 className="text-xl font-black uppercase border-b-4 border-black pb-2 flex justify-between items-end">
+                    <span>Cuenta de Resultados</span>
+                    <span className="text-[10px] text-gray-400 tracking-widest font-bold">UNIDAD: EUR</span>
+                  </h4>
+                  <div className="space-y-4 text-sm font-medium">
+                    <div className="flex justify-between p-4 bg-gray-50 border-l-4 border-black group hover:bg-gray-100 transition-all">
+                      <span className="font-bold flex items-center gap-2 uppercase tracking-tighter italic">Ventas Netas</span>
+                      <span className="text-xl font-black tabular-nums">{formatCurrency(selectedCompany['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'])}</span>
+                    </div>
+                    <div className="flex justify-between p-4 text-red-600 border-b border-gray-50 italic">
+                      <span>(-) Gastos de Personal</span>
+                      <span className="font-bold">{formatCurrency(selectedCompany['GASTOS DE PERSONAL'])}</span>
+                    </div>
+                    <div className="flex justify-between p-4 text-red-600 border-b border-gray-50 italic">
+                      <span>(-) Otros Gastos de Explotación</span>
+                      <span className="font-bold">{formatCurrency(selectedCompany['GASTOS DE EXPLOTACIÓN Y OTROS GASTOS DE EXPLOTACIÓN'])}</span>
+                    </div>
+                    <div className="flex justify-between p-5 bg-yellow-400/10 border-l-4 border-yellow-400">
+                      <span className="font-black text-lg uppercase tracking-tighter">(=) EBITDA Operativo</span>
+                      <span className="text-2xl font-black text-yellow-600 tabular-nums">{formatCurrency(selectedCompany['EBITDA'])}</span>
+                    </div>
+                    <div className="flex justify-between p-4 border-t-4 border-black bg-black text-white shadow-xl">
+                      <span className="font-black text-xl uppercase tracking-tighter italic">Resultado Neto Ejercicio</span>
+                      <span className="text-3xl font-black tabular-nums text-yellow-400">{formatCurrency(selectedCompany['RESULTADO DEL EJERCICIO'])}</span>
+                    </div>
                   </div>
                 </div>
-                <div className="space-y-8">
-                  <div className="bg-black text-white p-8 border-l-8 border-yellow-400 shadow-xl">
-                    <div className="flex items-center gap-2 mb-6 text-yellow-400"><h5 className="text-[10px] font-black uppercase tracking-widest">Visión Estratégica</h5></div>
-                    <div className="grid grid-cols-2 gap-8">
-                      <div><span className="text-3xl font-black block">{selectedCompany['NÚMERO MEDIO DE EMPLEADOS'] || '-'}</span><span className="text-[10px] uppercase font-bold text-gray-400 block mt-2">Personal</span></div>
-                      <div><span className="text-xl font-black block">{formatCurrency((selectedCompany['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'] || 0) / (selectedCompany['NÚMERO MEDIO DE EMPLEADOS'] || 1))}</span><span className="text-[10px] uppercase font-bold text-gray-400 block mt-2">Eficiencia/Pax</span></div>
+
+                {/* RATIOS Y VISIÓN DE NEGOCIO */}
+                <div className="space-y-10">
+                  <div className="bg-black text-white p-10 border-l-8 border-yellow-400 shadow-2xl relative overflow-hidden group">
+                    <TrendingUp className="absolute -right-10 -bottom-10 w-40 h-40 text-white/5 group-hover:scale-110 transition-transform duration-700" />
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.3em] text-yellow-400 mb-8">Ratios de Capital Humano</h5>
+                    <div className="grid grid-cols-2 gap-10">
+                      <div className="relative z-10">
+                        <span className="text-5xl font-black block leading-none mb-2 tracking-tighter">{selectedCompany['NÚMERO MEDIO DE EMPLEADOS'] || '-'}</span>
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-widest block">Consultores / Pax</span>
+                      </div>
+                      <div className="relative z-10">
+                        <span className="text-2xl font-black block leading-none mb-2 tracking-tighter text-yellow-400">
+                          {formatCurrency((selectedCompany['IMPORTEN NETO DE LA CIFRA DE NEGOCIO'] || 0) / (selectedCompany['NÚMERO MEDIO DE EMPLEADOS'] || 1))}
+                        </span>
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-widest block">Productividad / Pax</span>
+                      </div>
                     </div>
+                  </div>
+                  <div className="bg-gray-100 p-10 border-l-8 border-slate-300">
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400 mb-6 flex items-center gap-2">
+                       Objeto Social Registrado
+                    </h5>
+                    <p className="text-md leading-relaxed italic font-serif text-slate-700">
+                      "{String(selectedCompany['OBJETO SOCIAL'] || 'Descripción de actividad no disponible en el registro mercantil del último ejercicio.')}"
+                    </p>
+                  </div>
+                  <div className="flex gap-4">
+                    <button className="flex-1 bg-black text-white p-4 font-black uppercase text-xs tracking-widest hover:bg-yellow-400 hover:text-black transition-all">Exportar PDF</button>
+                    <button className="flex-1 border-4 border-black p-4 font-black uppercase text-xs tracking-widest hover:bg-black hover:text-white transition-all">Añadir a Comparativa</button>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-16 flex justify-center">
-                <button onClick={() => setSelectedCompany(null)} className="bg-black text-white px-20 py-5 font-black uppercase tracking-widest text-sm hover:bg-yellow-400 hover:text-black transition-all shadow-2xl active:scale-95">Cerrar Análisis de Inteligencia</button>
+              <div className="mt-20 flex justify-center">
+                <button 
+                  onClick={() => setSelectedCompany(null)} 
+                  className="bg-black text-white px-24 py-6 font-black uppercase tracking-[0.4em] text-sm hover:bg-yellow-400 hover:text-black transition-all shadow-2xl active:scale-95 border-b-8 border-yellow-600"
+                >
+                  Cerrar Análisis de Inteligencia
+                </button>
               </div>
             </div>
           </div>
