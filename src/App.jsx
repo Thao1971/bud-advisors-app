@@ -14,24 +14,21 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// --- CONFIGURACIÓN DE FIREBASE (SEGURA) ---
+// --- CONFIGURACIÓN DE FIREBASE ---
 const firebaseConfig = JSON.parse(__firebase_config);
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Sanitización del appId para evitar errores de segmentos en Firestore
+// REGLA 1: Sanitización de appId para evitar errores de segmentos de ruta (debe ser impar)
 const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'bud_intelligence_v24';
 const appId = rawAppId.replace(/[^a-zA-Z0-9]/g, '_'); 
 
-// --- MOTOR DE DATOS Y FORMATO ESPAÑOL ---
+// --- MOTOR DE DATOS Y FORMATO (ESPAÑA) ---
 const cleanValue = (val) => {
   if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
-  const cleaned = val.toString()
-    .replace(/[€\s%]/g, '')
-    .replace(/\./g, '') 
-    .replace(',', '.'); 
+  const cleaned = val.toString().replace(/[€\s%]/g, '').replace(/\./g, '').replace(',', '.'); 
   return parseFloat(cleaned) || 0;
 };
 
@@ -39,28 +36,22 @@ const getRevenue = (c) => cleanValue(c?.['IMPORTE NETO DE LA CIFRA DE NEGOCIOS']
 
 const formatM = (v) => {
   if (!v || isNaN(v)) return '0 M€';
-  return new Intl.NumberFormat('es-ES', { 
-    minimumFractionDigits: 1, 
-    maximumFractionDigits: 1 
-  }).format(v / 1000000) + ' M€';
+  return new Intl.NumberFormat('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(v / 1000000) + ' M€';
 };
 
 const formatFull = (v) => {
   if (!v || isNaN(v)) return '0 €';
-  return new Intl.NumberFormat('es-ES', { 
-    style: 'currency', 
-    currency: 'EUR', 
-    maximumFractionDigits: 0 
-  }).format(v);
+  return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v);
 };
 
 // --- COMPONENTES DE VISUALIZACIÓN ---
 
 const RadarChart = ({ company, data }) => {
-  if (!company || !data.length) return null;
+  if (!company) return null;
   const rev = getRevenue(company);
   const ebitda = cleanValue(company.EBITDA);
-  const peers = data.filter(c => c['CATEGORÍA'] === company['CATEGORÍA']);
+  const sector = company['CATEGORÍA'] || 'General';
+  const peers = data.filter(c => c['CATEGORÍA'] === sector);
   const avgRev = peers.length > 0 ? peers.reduce((a, b) => a + getRevenue(b), 0) / peers.length : 1000000;
   
   const axes = [
@@ -78,8 +69,8 @@ const RadarChart = ({ company, data }) => {
   }).join(' ');
 
   return (
-    <div className="flex flex-col items-center w-full">
-      <svg viewBox="-1.2 -1.2 2.4 2.4" className="w-full max-w-[200px] md:max-w-[240px] drop-shadow-2xl">
+    <div className="flex flex-col items-center">
+      <svg viewBox="-1.2 -1.2 2.4 2.4" className="w-full max-w-[240px] drop-shadow-2xl">
         {[0.2, 0.4, 0.6, 0.8, 1].map(r => <circle key={r} cx="0" cy="0" r={r} fill="none" stroke="#f1f5f9" strokeWidth="0.01" />)}
         {axes.map((ax, i) => {
           const angle = (i * 2 * Math.PI) / axes.length - Math.PI / 2;
@@ -109,18 +100,18 @@ const SankeyFlow = ({ company }) => {
 
   return (
     <div className="space-y-6">
-      <div className="h-40 flex items-stretch gap-1 bg-slate-50 p-6 border border-slate-200 rounded-sm overflow-hidden shadow-inner">
-        <div className="w-1/4 bg-black flex items-center justify-center relative">
+      <div className="h-40 flex items-stretch gap-1 bg-slate-50 p-6 border border-slate-200 rounded-sm overflow-hidden">
+        <div className="w-1/3 bg-black flex items-center justify-center relative">
            <span className="text-[10px] font-black text-white uppercase -rotate-90">Ingresos</span>
         </div>
         <div className="flex-1 flex flex-col gap-1">
-           <div className="bg-red-500/90 relative transition-all" style={{ height: `${(pers / (totalOut || 1)) * 100}%` }}>
-             <span className="absolute inset-0 flex items-center pl-4 text-[9px] font-black text-white uppercase italic">Personal</span>
+           <div className="bg-red-500/90 relative" style={{ height: `${(pers / (totalOut || 1)) * 100}%` }}>
+             <span className="absolute inset-0 flex items-center pl-4 text-[9px] font-black text-white uppercase italic">Talento</span>
            </div>
-           <div className="bg-red-400/80 relative transition-all" style={{ height: `${(opex / (totalOut || 1)) * 100}%` }}>
-             <span className="absolute inset-0 flex items-center pl-4 text-[9px] font-black text-white uppercase italic border-y border-white/10">Operativo</span>
+           <div className="bg-red-400/80 relative" style={{ height: `${(opex / (totalOut || 1)) * 100}%` }}>
+             <span className="absolute inset-0 flex items-center pl-4 text-[9px] font-black text-white uppercase italic">Estructura</span>
            </div>
-           <div className="bg-green-500 relative transition-all" style={{ height: `${(ebitda / (totalOut || 1)) * 100}%` }}>
+           <div className="bg-green-500 relative" style={{ height: `${(ebitda / (totalOut || 1)) * 100}%` }}>
              <span className="absolute inset-0 flex items-center pl-4 text-[9px] font-black text-white uppercase italic font-mono">EBITDA</span>
            </div>
         </div>
@@ -175,7 +166,7 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const chatEndRef = useRef(null);
 
-  // AUTH
+  // REGLA 3: Autenticación primero
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -193,12 +184,13 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // SYNC DATA
+  // REGLA 1: Sincronización de datos tras autenticación
   useEffect(() => {
     if (!user) return;
     const colPath = collection(db, 'artifacts', appId, 'public', 'data', 'companies');
     const unsubscribe = onSnapshot(colPath, (snap) => {
       const docs = snap.docs.map(d => d.data());
+      // REGLA 2: Ordenación en memoria
       docs.sort((a, b) => getRevenue(b) - getRevenue(a));
       setData(docs);
       setLoading(false);
@@ -240,7 +232,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // INTEL
+  // INTEL LÓGICA
   const globalStats = useMemo(() => {
     const totalRev = data.reduce((acc, curr) => acc + getRevenue(curr), 0);
     const totalEbitda = data.reduce((acc, curr) => acc + cleanValue(curr.EBITDA), 0);
@@ -311,6 +303,7 @@ export default function App() {
         .tabular-nums { font-variant-numeric: tabular-nums; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         input[type="range"]::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; background: #000; border: 3px solid #fbbf24; border-radius: 50%; cursor: pointer; }
+        .glass-ai { background: rgba(255,255,255,0.8); backdrop-filter: blur(20px); border: 2px solid #000; }
       `}</style>
 
       {/* NAVBAR */}
@@ -365,7 +358,7 @@ export default function App() {
                    return (
                      <div key={i} 
                           onClick={() => { setSelectedCompany(c); setActiveTab('overview'); }}
-                          className="absolute w-3 h-3 rounded-full bg-black border-2 border-yellow-400 hover:scale-[3.5] hover:bg-yellow-400 hover:z-[200] transition-all duration-300 group shadow-lg"
+                          className="absolute w-3 h-3 rounded-full bg-black border-2 border-yellow-400 hover:scale-[3.5] hover:bg-yellow-400 hover:z-[200] transition-all duration-300 group shadow-lg cursor-pointer"
                           style={{ left: `${x}%`, top: `${y}%` }}>
                         <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 bg-black text-white text-[9px] font-black p-1.5 px-3 rounded-sm whitespace-nowrap mb-3 shadow-2xl border border-yellow-400 z-[300]">
                            {String(c.ACRONIMO || c['DENOMINACIÓN SOCIAL'])}
@@ -423,7 +416,7 @@ export default function App() {
                     {String(selectedCompany.ACRONIMO || selectedCompany['DENOMINACIÓN SOCIAL'])}
                   </h2>
                 </div>
-                <button onClick={() => setSelectedCompany(null)} className="p-6 border-4 border-slate-100 rounded-full hover:bg-slate-100 transition-all text-black"><X className="w-10 h-10" /></button>
+                <button onClick={() => setSelectedCompany(null)} className="p-6 border-4 border-slate-100 rounded-full hover:bg-slate-100 transition-all text-black hover:rotate-90 shadow-2xl bg-white"><X className="w-10 h-10" /></button>
               </div>
 
               {/* TABS */}
@@ -453,9 +446,9 @@ export default function App() {
                               { l: 'Revenue', v: formatM(getRevenue(selectedCompany)), c: 'black' },
                               { l: 'EBITDA', v: formatM(cleanValue(selectedCompany.EBITDA)), c: 'yellow-400' },
                               { l: 'Margen %', v: String(companyProAnalysis.margin.toFixed(1))+'%', c: 'black' },
-                              { l: 'Profit', v: formatM(cleanValue(selectedCompany['RESULTADO DEL EJERCICIO'])), c: 'yellow-400', inv: true }
+                              { l: 'Net Profit', v: formatM(cleanValue(selectedCompany['RESULTADO DEL EJERCICIO'])), c: 'yellow-400', inv: true }
                             ].map((k, i) => (
-                              <div key={i} className={`${k.inv ? 'bg-black text-white' : 'bg-slate-50'} p-10 border-b-[10px] border-${k.c} rounded-sm shadow-xl flex flex-col justify-between group overflow-hidden`}>
+                              <div key={i} className={`${k.inv ? 'bg-black text-white' : 'bg-slate-50'} p-10 border-b-[10px] border-${k.c} rounded-sm shadow-xl flex flex-col justify-between overflow-hidden group`}>
                                  <span className="text-[10px] font-black uppercase text-slate-400 block mb-6 italic tracking-widest">{String(k.l)}</span>
                                  <span className="text-3xl md:text-4xl font-black tabular-nums tracking-tighter italic truncate leading-none block">{String(k.v)}</span>
                               </div>
@@ -478,37 +471,38 @@ export default function App() {
                       <div className="bg-white border-2 border-slate-50 p-12 shadow-2xl space-y-16 group relative overflow-hidden">
                          <div className="flex items-center gap-6 mb-12 leading-none">
                             <div className="bg-black p-3 rounded-sm text-yellow-400 shadow-xl group-hover:rotate-12 transition-transform"><Scale className="w-10 h-10" /></div>
-                            <h4 className="text-3xl font-black uppercase tracking-tighter italic leading-none">M&A Multiplier Tool</h4>
+                            <h4 className="text-3xl font-black uppercase tracking-tighter italic leading-none">Enterprise Value Simulation</h4>
                          </div>
                          <div className="space-y-16">
                             <div className="space-y-12">
                                <div>
-                                  <div className="flex justify-between mb-6 leading-none"><label className="text-[11px] font-black uppercase text-slate-500 italic tracking-widest">EBITDA Multiplier (x)</label><span className="bg-black text-yellow-400 px-5 py-1.5 text-sm font-black italic tracking-[0.2em]">{valMult}x</span></div>
+                                  <div className="flex justify-between mb-6 leading-none"><label className="text-[11px] font-black uppercase text-slate-500 italic tracking-widest leading-none">Multiplicador EBITDA (x)</label><span className="bg-black text-yellow-400 px-5 py-1.5 text-sm font-black italic tracking-[0.2em]">{valMult}x</span></div>
                                   <input type="range" min="4" max="15" step="0.5" value={valMult} onChange={(e) => setValMult(parseFloat(e.target.value))} className="w-full h-5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-black" />
                                </div>
                                <div>
-                                  <div className="flex justify-between mb-6 leading-none"><label className="text-[11px] font-black uppercase text-slate-500 italic tracking-widest">OPEX Efficiency (%)</label><span className="bg-yellow-400 text-black px-5 py-1.5 text-sm font-black italic tracking-[0.2em]">{salarySens}%</span></div>
+                                  <div className="flex justify-between mb-6 leading-none"><label className="text-[11px] font-black uppercase text-slate-500 italic tracking-widest leading-none">Optimización Proyectada (%)</label><span className="bg-yellow-400 text-black px-5 py-1.5 text-sm font-black italic tracking-[0.2em]">{salarySens}%</span></div>
                                   <input type="range" min="-30" max="30" step="1" value={salarySens} onChange={(e) => setSalarySens(parseFloat(e.target.value))} className="w-full h-5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
                                </div>
                             </div>
                             <div className="pt-12 border-t-8 border-slate-50">
                                <div className="bg-black text-white p-14 border-l-[30px] border-yellow-400 flex flex-wrap justify-between items-center gap-10 shadow-2xl rounded-sm">
-                                  <span className="text-[14px] font-black uppercase italic text-yellow-400">Equity Value Estimate</span>
-                                  <span className="text-6xl md:text-8xl font-black text-yellow-400 tabular-nums tracking-tighter italic leading-none block">{formatFull(Math.max(0, (companyProAnalysis.ebitdaAdj * valMult) - (cleanValue(selectedCompany['PASIVO CORRIENTE']) - cleanValue(selectedCompany['ACTIVO CORRIENTE']))))}</span>
+                                  <span className="text-[14px] font-black uppercase italic text-yellow-400 leading-none block">Equity Buyout Value</span>
+                                  <span className="text-6xl md:text-8xl font-black text-yellow-400 tabular-nums tracking-tighter italic drop-shadow-2xl leading-none">{formatFull(Math.max(0, (companyProAnalysis.ebitdaAdj * valMult) - (cleanValue(selectedCompany['PASIVO CORRIENTE']) - cleanValue(selectedCompany['ACTIVO CORRIENTE']))))}</span>
                                </div>
                             </div>
                          </div>
                       </div>
                       <div className="bg-slate-50 p-16 shadow-xl flex flex-col items-center justify-center text-center relative group overflow-hidden">
+                         <h4 className="text-[12px] font-black uppercase text-slate-400 mb-16 italic border-b-2 pb-6 border-slate-200 tracking-widest leading-none">Sensitivity Analysis</h4>
                          <DonutChart data={[companyProAnalysis.persAdj, companyProAnalysis.others]} colors={['#000', '#FACC15']} />
                          <div className="mt-16 grid grid-cols-2 gap-20 w-full text-left pt-14 border-t-4 border-slate-200">
                             <div className="leading-none space-y-4">
-                               <span className="text-[11px] font-black text-slate-500 block italic leading-none">Personnel Cost (Adj)</span>
-                               <span className="text-4xl font-black tabular-nums italic text-slate-900 block truncate">{formatFull(companyProAnalysis.persAdj)}</span>
+                               <div className="flex items-center gap-4 font-black uppercase tracking-[0.3em] text-[11px] italic text-slate-500 leading-none italic"><div className="w-4 h-4 bg-black shadow-xl"></div>Talento</div>
+                               <span className="text-4xl font-black tabular-nums italic text-slate-900 leading-none block truncate">{formatFull(companyProAnalysis.persAdj)}</span>
                             </div>
                             <div className="leading-none space-y-4">
-                               <span className="text-[11px] font-black text-slate-500 block italic leading-none">Fixed Structure</span>
-                               <span className="text-4xl font-black tabular-nums italic text-slate-900 block truncate">{formatFull(companyProAnalysis.others)}</span>
+                               <div className="flex items-center gap-4 font-black uppercase tracking-[0.3em] text-[11px] italic text-slate-500 leading-none italic"><div className="w-4 h-4 bg-yellow-400 shadow-xl"></div>Estructura</div>
+                               <span className="text-4xl font-black tabular-nums italic text-slate-900 leading-none block truncate">{formatFull(companyProAnalysis.others)}</span>
                             </div>
                          </div>
                       </div>
@@ -525,25 +519,28 @@ export default function App() {
                             <span className={`text-6xl md:text-8xl font-black tabular-nums tracking-tighter italic leading-none drop-shadow-2xl z-10 ${cleanValue(selectedCompany['ACTIVO CORRIENTE']) - cleanValue(selectedCompany['PASIVO CORRIENTE']) > 0 ? 'text-green-400' : 'text-red-500'}`}>{formatFull(cleanValue(selectedCompany['ACTIVO CORRIENTE']) - cleanValue(selectedCompany['PASIVO CORRIENTE']))}</span>
                          </div>
                       </div>
-                      <div className="space-y-12 font-mono text-[11px] font-black uppercase tracking-widest italic">
-                         {[
-                           { l: '(+) Net Business Revenue', v: getRevenue(selectedCompany), bg: 'bg-slate-900 text-white p-6 border-l-[15px] border-yellow-400 shadow-xl' },
-                           { l: '(-) Talent Investment', v: cleanValue(selectedCompany['GASTOS DE PERSONAL']) },
-                           { l: '(-) Operational Structural Cost', v: cleanValue(selectedCompany['OTROS GASTOS DE EXPLOTACION']) },
-                           { l: '(=) Operating EBITDA', v: cleanValue(selectedCompany.EBITDA), color: 'text-yellow-600', border: 'border-y-4 border-yellow-400 py-8 my-8' },
-                           { l: '(=) Final Result', v: cleanValue(selectedCompany['RESULTADO DEL EJERCICIO']), bg: 'bg-black text-white p-10 mt-12 shadow-2xl border-b-[15px] border-yellow-600' }
-                         ].map((r, idx) => (
-                           <div key={idx} className={`flex justify-between items-center ${r.bg || ''} ${r.border || 'border-b border-slate-100 pb-4'} ${r.color || ''}`}>
-                              <span>{String(r.l)}</span><span className="tabular-nums text-xl leading-none">{formatFull(r.v)}</span>
-                           </div>
-                         ))}
+                      <div className="space-y-12">
+                         <h4 className="text-5xl font-black uppercase border-b-[20px] border-black pb-8 italic leading-none">Audit Record</h4>
+                         <div className="space-y-4 font-mono text-[11px] font-black uppercase tracking-widest italic">
+                            {[
+                              { l: '(+) Net Turnover', v: getRevenue(selectedCompany), bg: 'bg-slate-900 text-white p-6 border-l-[15px] border-yellow-400 shadow-xl' },
+                              { l: '(-) Personnel Cost', v: cleanValue(selectedCompany['GASTOS DE PERSONAL']) },
+                              { l: '(-) Structural OPEX', v: cleanValue(selectedCompany['OTROS GASTOS DE EXPLOTACION']) },
+                              { l: '(=) EBITDA', v: cleanValue(selectedCompany.EBITDA), color: 'text-yellow-600', border: 'border-y-4 border-yellow-400 py-8 my-8' },
+                              { l: '(=) Final Result', v: cleanValue(selectedCompany['RESULTADO DEL EJERCICIO']), bg: 'bg-black text-white p-10 mt-12 shadow-2xl border-b-[15px] border-yellow-600' }
+                            ].map((r, idx) => (
+                              <div key={idx} className={`flex justify-between items-center ${r.bg || ''} ${r.border || 'border-b border-slate-100 pb-4'} ${r.color || ''}`}>
+                                 <span>{String(r.l)}</span><span className="tabular-nums text-xl leading-none">{formatFull(r.v)}</span>
+                              </div>
+                            ))}
+                         </div>
                       </div>
                    </div>
                  )}
 
                  {activeTab === 'peers' && (
                    <div className="space-y-16 animate-in zoom-in duration-500">
-                      <h4 className="text-5xl md:text-8xl font-black uppercase tracking-tighter italic text-black leading-none italic">Peer Comparison Intelligence</h4>
+                      <h4 className="text-5xl md:text-7xl font-black uppercase tracking-tighter italic text-black leading-none italic text-center">Peer Comparison Intelligence</h4>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-12">
                         {similar.map((c, i) => (
                           <div key={i} onClick={() => { setSelectedCompany(c); setActiveTab('overview'); }} className="bg-white border-4 border-slate-50 hover:border-yellow-400 hover:shadow-2xl transition-all cursor-pointer group flex flex-col justify-between min-h-[450px] shadow-2xl relative overflow-hidden rounded-sm">
@@ -562,7 +559,7 @@ export default function App() {
               </div>
 
               <div className="mt-32 pt-12 border-t-[15px] border-slate-50 flex justify-center pb-40">
-                <button onClick={() => setSelectedCompany(null)} className="bg-black text-white px-20 md:px-96 py-10 md:py-20 font-black uppercase tracking-[1.4em] text-[11px] md:text-sm hover:bg-yellow-400 hover:text-black transition-all shadow-2xl border-b-[40px] border-yellow-600 italic leading-none block text-center cursor-pointer active:scale-95">CLOSE DOSSIER</button>
+                <button onClick={() => setSelectedCompany(null)} className="bg-black text-white px-20 md:px-96 py-10 md:py-20 font-black uppercase tracking-[1.4em] text-[11px] md:text-xs hover:bg-yellow-400 hover:text-black transition-all shadow-2xl border-b-[40px] border-yellow-600 italic leading-none block text-center cursor-pointer active:scale-95">CLOSE STRATEGIC DOSSIER</button>
               </div>
             </div>
           </div>
