@@ -29,20 +29,11 @@ const firebaseConfig = getFirebaseConfig();
 const app = firebaseConfig ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
-const appId = "bud_market_intelligence_final_v7"; // Nueva versión estable
+const appId = "bud_intelligence_v9_compact"; 
 
-// --- UTILIDADES DE FORMATO ---
-const formatCurrency = (v) => {
-  if (v === undefined || v === null || isNaN(v)) return '-';
-  return new Intl.NumberFormat('es-ES', { 
-    style: 'currency', 
-    currency: 'EUR', 
-    maximumFractionDigits: 0 
-  }).format(v);
-};
-
+// --- MOTOR DE LIMPIEZA Y FORMATO ---
 const cleanValue = (val) => {
-  if (val === undefined || val === null) return 0;
+  if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
   const cleaned = val.toString()
     .replace(/[€\s%]/g, '')
@@ -51,12 +42,31 @@ const cleanValue = (val) => {
   return parseFloat(cleaned) || 0;
 };
 
+// Formatea en k€ (dividido por 1000) para ahorrar espacio
+const formatK = (v) => {
+  if (v === undefined || v === null || isNaN(v)) return '-';
+  const kValue = v / 1000;
+  return new Intl.NumberFormat('es-ES', { 
+    maximumFractionDigits: 0 
+  }).format(kValue) + ' k€';
+};
+
+// Formato moneda completo para fichas internas
+const formatFull = (v) => {
+  if (v === undefined || v === null || isNaN(v)) return '-';
+  return new Intl.NumberFormat('es-ES', { 
+    style: 'currency', 
+    currency: 'EUR', 
+    maximumFractionDigits: 0 
+  }).format(v);
+};
+
 export default function App() {
   const [data, setData] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [status, setStatus] = useState({ type: 'info', msg: 'Sincronizando Hub de Inteligencia...' });
+  const [status, setStatus] = useState({ type: 'info', msg: 'Sincronizando Terminal...' });
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todas');
   const [selectedSubcategory, setSelectedSubcategory] = useState('Todas');
@@ -65,33 +75,33 @@ export default function App() {
   // 1. AUTENTICACIÓN
   useEffect(() => {
     if (!auth) {
-      setStatus({ type: 'error', msg: 'Falta VITE_FIREBASE_CONFIG en Netlify.' });
+      setStatus({ type: 'error', msg: 'Falta configuración en Netlify.' });
       setLoading(false);
       return;
     }
-    signInAnonymously(auth).catch(err => setStatus({ type: 'error', msg: `Error Auth: ${err.message}` }));
+    signInAnonymously(auth).catch(err => setStatus({ type: 'error', msg: `Error: ${err.message}` }));
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // 2. SINCRONIZACIÓN DE DATOS
+  // 2. ESCUCHA DE DATOS (COLUMNAS EXACTAS CSV)
   useEffect(() => {
     if (!db || !user) return;
     const q = collection(db, 'artifacts', appId, 'public', 'data', 'companies');
     const unsubscribe = onSnapshot(q, (snap) => {
       const docs = snap.docs.map(d => d.data());
-      // Ordenar por volumen de negocio
-      docs.sort((a, b) => cleanValue(b['IMPORTE NETO DE LA CIFRA DE NEGOCIOS']) - cleanValue(a['IMPORTE NETO DE LA CIFRA DE NEGOCIO']));
+      // Ordenar por IMPORTE NETO DE LA CIFRA DE NEGOCIOS
+      docs.sort((a, b) => cleanValue(b['IMPORTE NETO DE LA CIFRA DE NEGOCIOS']) - cleanValue(a['IMPORTE NETO DE LA CIFRA DE NEGOCIOS']));
       setData(docs);
       setLoading(false);
-      if (docs.length > 0) setStatus({ type: 'success', msg: 'SISTEMA ONLINE - Inteligencia Activa' });
+      if (docs.length > 0) setStatus({ type: 'success', msg: 'TERMINAL ONLINE' });
     }, (err) => {
       setLoading(false);
-      setStatus({ type: 'error', msg: 'Error de acceso a la base de datos cloud.' });
+      setStatus({ type: 'error', msg: 'Fallo en la nube.' });
     });
     return () => unsubscribe();
   }, [user]);
 
-  // 3. CARGA DE CSV INTELIGENTE
+  // 3. CARGA DE CSV
   const handleUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !db || !user) return;
@@ -110,7 +120,7 @@ export default function App() {
           const obj = {};
           headers.forEach((h, idx) => {
             let val = values[idx]?.trim().replace(/^"|"$/g, '');
-            const isNumeric = ['IMPORTE', 'GASTOS', 'EBITDA', 'RESULTADO', 'ACTIVO', 'PASIVO', 'PATRIMONIO', 'AMORTIZACION'].some(k => h.toUpperCase().includes(k));
+            const isNumeric = ['IMPORTE', 'GASTOS', 'EBITDA', 'RESULTADO', 'ACTIVO', 'PASIVO', 'PATRIMONIO'].some(k => h.toUpperCase().includes(k));
             obj[h] = (isNumeric && val) ? cleanValue(val) : val;
           });
           if (obj['CIF EMPRESA']) {
@@ -125,9 +135,9 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // --- LÓGICA DE NEGOCIO AGREGADA ---
+  // --- LÓGICA AGREGADA ---
   const aggregates = useMemo(() => {
-    const totalRev = data.reduce((acc, curr) => acc + (cleanValue(curr['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])), 0);
+    const totalRev = data.reduce((acc, curr) => acc + (cleanValue(curr['IMPORTE NETO DE LA CIFRA DE NEGOCIOS'])), 0);
     const totalEbitda = data.reduce((acc, curr) => acc + (cleanValue(curr['EBITDA'])), 0);
     const totalTalent = data.reduce((acc, curr) => acc + (cleanValue(curr['GASTOS DE PERSONAL'])), 0);
     
@@ -136,33 +146,12 @@ export default function App() {
       const cat = c['CATEGORÍA'] || 'General';
       if (!cats[cat]) cats[cat] = { count: 0, revenue: 0 };
       cats[cat].count++;
-      cats[cat].revenue += cleanValue(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO']);
+      cats[cat].revenue += cleanValue(c['IMPORTE NETO DE LA CIFRA DE NEGOCIOS']);
     });
-
     return { totalRev, totalEbitda, totalTalent, cats };
   }, [data]);
 
-  // --- LÓGICA DE SIMILITUD (PEER ANALYSIS) ---
-  const similarCompanies = useMemo(() => {
-    if (!selectedCompany) return [];
-    const currentRev = cleanValue(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO']);
-    const currentCat = selectedCompany['CATEGORÍA'];
-    
-    return data
-      .filter(c => c['CIF EMPRESA'] !== selectedCompany['CIF EMPRESA'])
-      .map(c => {
-        const cRev = cleanValue(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO']);
-        const revDiff = Math.abs(currentRev - cRev) / (currentRev || 1);
-        const catMatch = c['CATEGORÍA'] === currentCat ? 0 : 1;
-        // Scoring: 70% peso facturación (tamaño/vida), 30% sector
-        const score = (revDiff * 0.7) + (catMatch * 0.3);
-        return { ...c, similarityScore: score };
-      })
-      .sort((a, b) => a.similarityScore - b.similarityScore)
-      .slice(0, 4);
-  }, [selectedCompany, data]);
-
-  const topTen = useMemo(() => data.slice(0, 10), [data]);
+  const topFive = useMemo(() => data.slice(0, 5), [data]);
   const categoriesList = useMemo(() => ['Todas', ...new Set(data.map(c => c['CATEGORÍA']).filter(Boolean))], [data]);
   const subcategoriesList = useMemo(() => ['Todas', ...new Set(data.filter(c => selectedCategory === 'Todas' || c['CATEGORÍA'] === selectedCategory).map(c => c['SUBCATEGORÍA']).filter(Boolean))], [data, selectedCategory]);
 
@@ -176,103 +165,100 @@ export default function App() {
     });
   }, [data, searchTerm, selectedCategory, selectedSubcategory]);
 
+  const similarCompanies = useMemo(() => {
+    if (!selectedCompany) return [];
+    const currentRev = cleanValue(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIOS']);
+    const currentCat = selectedCompany['CATEGORÍA'];
+    return data
+      .filter(c => c['CIF EMPRESA'] !== selectedCompany['CIF EMPRESA'])
+      .map(c => {
+        const score = (Math.abs(currentRev - cleanValue(c['IMPORTE NETO DE LA CIFRA DE NEGOCIOS'])) / (currentRev || 1)) + (c['CATEGORÍA'] === currentCat ? 0 : 1);
+        return { ...c, score };
+      })
+      .sort((a, b) => a.score - b.score)
+      .slice(0, 4);
+  }, [selectedCompany, data]);
+
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-slate-900 font-sans selection:bg-yellow-200">
-      {/* NAVBAR */}
-      <nav className="bg-black text-white p-6 border-b-4 border-yellow-400 sticky top-0 z-[60] shadow-2xl flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <div className="bg-yellow-400 p-2 rounded shadow-inner animate-pulse"><Building2 className="text-black w-6 h-6" /></div>
+    <div className="min-h-screen bg-[#FDFDFD] text-slate-900 font-sans antialiased selection:bg-yellow-100">
+      {/* NAVBAR ULTRA-COMPACTO */}
+      <nav className="bg-black text-white px-6 py-3 border-b-2 border-yellow-400 sticky top-0 z-[60] shadow-md flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <div className="bg-yellow-400 p-1 rounded-sm"><Building2 className="text-black w-4 h-4" /></div>
           <div className="flex flex-col leading-none">
-            <span className="font-black text-2xl tracking-tighter uppercase italic">BUD <span className="text-yellow-400 font-black">ADVISORS</span></span>
-            <span className="text-[10px] tracking-[0.4em] text-slate-400 font-bold uppercase mt-1 italic">Intelligence Hub</span>
+            <span className="font-black text-lg tracking-tighter uppercase italic">BUD <span className="text-yellow-400">ADVISORS</span></span>
+            <span className="text-[7px] tracking-[0.4em] text-slate-400 font-bold uppercase">Market Intelligence</span>
           </div>
         </div>
-        <label className={`bg-yellow-400 hover:bg-yellow-300 text-black px-6 py-3 font-black text-xs uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2 shadow-lg ${uploading ? 'opacity-50' : ''}`}>
-          <Upload className="w-4 h-4" /> {uploading ? 'SINCRONIZANDO...' : 'ACTUALIZAR NUBE'}
-          <input type="file" onChange={handleUpload} className="hidden" accept=".csv" disabled={uploading} />
+        <label className="bg-yellow-400 hover:bg-yellow-300 text-black px-3 py-1.5 font-black text-[9px] uppercase tracking-widest cursor-pointer transition-all flex items-center gap-2 rounded-sm">
+          <Upload className="w-3 h-3" /> {uploading ? '...' : 'CARGAR CSV'}
+          <input type="file" onChange={handleUpload} className="hidden" accept=".csv" />
         </label>
       </nav>
 
-      {/* BARRA DE ESTADO */}
-      <div className={`p-2.5 text-[10px] font-black uppercase tracking-[0.2em] text-center border-b transition-all duration-700 ${status.type === 'error' ? 'bg-red-600 text-white' : status.type === 'success' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'}`}>
-        <div className="flex items-center justify-center gap-2">
-          {status.type === 'error' ? <AlertCircle className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />} {status.msg}
-        </div>
+      {/* MONITOR STATUS */}
+      <div className={`py-1 text-[7px] font-black uppercase tracking-[0.4em] text-center border-b ${status.type === 'error' ? 'bg-red-600 text-white' : 'bg-slate-50 text-slate-400'}`}>
+        {status.msg}
       </div>
 
-      <main className="max-w-7xl mx-auto p-8">
+      <main className="max-w-6xl mx-auto p-6">
         
-        {/* --- FRONT: RADAR DE MERCADO AGREGADO --- */}
-        <section className="mb-20 animate-in fade-in slide-in-from-bottom-4 duration-700">
-          <div className="flex items-center gap-3 mb-10 border-b-2 border-black pb-4">
-            <LayoutDashboard className="w-6 h-6 text-black" />
-            <h2 className="text-lg font-black uppercase tracking-[0.2em] italic">Radar Sectorial BUD Advisors</h2>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-            <div className="bg-black text-white p-10 border-l-[12px] border-yellow-400 shadow-xl relative overflow-hidden group">
-              <DollarSign className="absolute -right-4 -bottom-4 w-28 h-28 text-white/5 group-hover:scale-110 transition-transform" />
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-3">Volumen Negocio Agregado</span>
-              <span className="text-3xl lg:text-5xl font-black block tabular-nums tracking-tighter truncate leading-none">
-                {formatCurrency(aggregates.totalRev)}
+        {/* --- DASHBOARD COMPACTO --- */}
+        <section className="mb-10">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <div className="bg-black text-white p-5 border-l-4 border-yellow-400 shadow flex flex-col justify-center">
+              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1 italic">V. Negocio Total</span>
+              <span className="text-xl font-black tabular-nums tracking-tighter overflow-hidden whitespace-nowrap">
+                {formatK(aggregates.totalRev)}
               </span>
             </div>
-            
-            <div className="bg-white p-10 border-l-[12px] border-black shadow-lg group">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3">Rentabilidad (EBITDA)</span>
-              <span className="text-3xl lg:text-4xl font-black block text-green-600 tabular-nums tracking-tighter truncate">
-                {formatCurrency(aggregates.totalEbitda)}
-              </span>
-              <span className="text-[9px] font-black text-slate-400 uppercase mt-4 block tracking-[0.2em] italic">
-                MARGEN MEDIO: {((aggregates.totalEbitda / (aggregates.totalRev || 1)) * 100).toFixed(1)}%
+            <div className="bg-white p-5 border-l-4 border-black shadow flex flex-col justify-center">
+              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1 italic">EBITDA Agregado</span>
+              <span className="text-xl font-black text-green-600 tabular-nums tracking-tighter overflow-hidden whitespace-nowrap">
+                {formatK(aggregates.totalEbitda)}
               </span>
             </div>
-
-            <div className="bg-white p-10 border-l-[12px] border-slate-200 shadow-lg">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3">Talent Pool / Salarios</span>
-              <span className="text-3xl lg:text-4xl font-black block text-slate-900 tabular-nums tracking-tighter truncate">
-                {formatCurrency(Math.abs(aggregates.totalTalent))}
+            <div className="bg-white p-5 border-l-4 border-slate-200 shadow flex flex-col justify-center">
+              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1 italic">Talento (k€)</span>
+              <span className="text-xl font-black text-slate-900 tabular-nums tracking-tighter overflow-hidden whitespace-nowrap">
+                {formatK(Math.abs(aggregates.totalTalent))}
               </span>
-              <div className="w-full bg-slate-100 h-1.5 mt-5 rounded-full overflow-hidden">
-                <div className="bg-blue-600 h-full" style={{width: `${Math.min(100, (Math.abs(aggregates.totalTalent)/(aggregates.totalRev || 1))*100)}%`}}></div>
-              </div>
             </div>
-
-            <div className="bg-white p-10 border-l-[12px] border-slate-200 shadow-lg flex flex-col justify-center">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3 text-center">Entidades HUB</span>
-              <span className="text-6xl font-black block text-slate-900 tabular-nums text-center leading-none tracking-tighter">{data.length}</span>
+            <div className="bg-white p-5 border-l-4 border-slate-200 shadow flex flex-col justify-center">
+              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1 italic">Nº Agencias</span>
+              <span className="text-2xl font-black text-slate-900 tabular-nums">{data.length}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-            {/* CUOTA POR SECTOR */}
-            <div className="bg-white p-12 border border-slate-100 shadow-xl rounded-sm">
-              <h3 className="text-[12px] font-black uppercase tracking-[0.3em] text-slate-400 mb-10 flex items-center gap-4"><PieChart className="w-5 h-5" /> Distribución de Negocio por Sector</h3>
-              <div className="space-y-8">
-                {Object.entries(aggregates.cats).sort((a,b) => b[1].revenue - a[1].revenue).slice(0, 5).map(([name, stat]) => (
-                  <div key={name} className="group">
-                    <div className="flex justify-between text-[11px] font-black uppercase mb-3 tracking-widest">
-                      <span className="text-slate-800 italic">{name}</span>
-                      <span className="tabular-nums text-slate-500">{((stat.revenue / (aggregates.totalRev || 1)) * 100).toFixed(1)}%</span>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            {/* DISTRIBUCIÓN POR SECTOR */}
+            <div className="lg:col-span-7 bg-white p-6 border border-slate-100 shadow-sm rounded-sm">
+              <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2 italic"><PieChart className="w-3 h-3" /> Distribución Sectorial</h3>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                {Object.entries(aggregates.cats).sort((a,b) => b[1].revenue - a[1].revenue).slice(0, 6).map(([name, stat]) => (
+                  <div key={name}>
+                    <div className="flex justify-between text-[8px] font-black uppercase mb-1 tracking-tight">
+                      <span className="text-slate-600 truncate max-w-[100px]">{name}</span>
+                      <span className="tabular-nums text-slate-400">{((stat.revenue / (aggregates.totalRev || 1)) * 100).toFixed(1)}%</span>
                     </div>
-                    <div className="w-full bg-slate-50 h-3 border border-slate-100 rounded-full overflow-hidden">
-                      <div className="bg-black h-full group-hover:bg-yellow-400 transition-all duration-500" style={{width: `${(stat.revenue / (aggregates.totalRev || 1)) * 100}%`}}></div>
+                    <div className="w-full bg-slate-50 h-1 rounded-full overflow-hidden border border-slate-100">
+                      <div className="bg-black h-full" style={{width: `${(stat.revenue / (aggregates.totalRev || 1)) * 100}%`}}></div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-            {/* TOP 5 LIDERAZGO */}
-            <div className="bg-black text-white p-12 shadow-2xl rounded-sm relative overflow-hidden">
-              <h3 className="text-[12px] font-black uppercase tracking-[0.3em] text-yellow-400 mb-10 flex items-center gap-4"><Trophy className="w-5 h-5" /> Ranking Liderazgo Facturación</h3>
-              <div className="space-y-6">
-                {topTen.slice(0, 5).map((c, i) => (
-                  <div key={i} onClick={() => setSelectedCompany(c)} className="flex items-center justify-between p-5 border-b border-white/10 hover:bg-white/5 cursor-pointer transition-all rounded-sm group">
-                    <div className="flex items-center gap-6">
-                      <span className="text-yellow-400 font-black italic tabular-nums text-2xl">0{i+1}</span>
-                      <span className="font-bold uppercase text-sm tracking-[0.1em] group-hover:text-yellow-400 transition-colors truncate max-w-[200px]">{c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}</span>
+            {/* RANKING LÍDERES */}
+            <div className="lg:col-span-5 bg-slate-900 text-white p-6 shadow-xl rounded-sm">
+              <h3 className="text-[9px] font-black uppercase tracking-widest text-yellow-400 mb-4 flex items-center gap-2 italic"><Trophy className="w-3 h-3" /> Top Liderazgo</h3>
+              <div className="space-y-2">
+                {topFive.map((c, i) => (
+                  <div key={i} onClick={() => setSelectedCompany(c)} className="flex items-center justify-between py-1.5 border-b border-white/5 hover:text-yellow-400 cursor-pointer transition-all group">
+                    <div className="flex items-center gap-2">
+                      <span className="text-yellow-400 font-bold text-[9px] tabular-nums">0{i+1}</span>
+                      <span className="font-bold uppercase text-[9px] tracking-tight truncate max-w-[120px]">{c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}</span>
                     </div>
-                    <span className="font-black tabular-nums text-xl tracking-tighter shrink-0">{formatCurrency(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}</span>
+                    <span className="font-black tabular-nums text-[10px] tracking-tighter italic">{formatK(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}</span>
                   </div>
                 ))}
               </div>
@@ -280,48 +266,38 @@ export default function App() {
           </div>
         </section>
 
-        {/* --- FILTROS DE BÚSQUEDA --- */}
-        <section className="bg-white p-10 shadow-2xl mb-12 border-t-[12px] border-black rounded-sm">
-          <div className="flex items-center gap-6 border-b-4 border-slate-100 pb-8 mb-10 group">
-            <Search className="text-slate-300 transition-all w-12 h-12" />
-            <input className="w-full outline-none font-black text-3xl lg:text-5xl placeholder-slate-200 bg-transparent uppercase tracking-tighter" placeholder="Localizar Agencia o CIF..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+        {/* --- FILTROS COMPACTOS --- */}
+        <section className="bg-white p-4 shadow-sm mb-6 border-t-2 border-black rounded-sm flex flex-col md:flex-row gap-3">
+          <div className="flex-1 flex items-center gap-2 border-b md:border-b-0 md:border-r border-slate-100 pb-1 md:pb-0 md:pr-3">
+            <Search className="text-slate-300 w-4 h-4" />
+            <input className="w-full outline-none font-bold text-xs placeholder-slate-200 bg-transparent uppercase" placeholder="BUSCAR AGENCIA / CIF..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-            <div className="flex flex-col gap-3">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] flex items-center gap-2"><Filter className="w-4 h-4" /> Sector</span>
-              <select className="w-full p-6 bg-slate-50 border-2 border-transparent focus:border-yellow-400 outline-none font-bold uppercase tracking-widest shadow-inner cursor-pointer" value={selectedCategory} onChange={(e) => {setSelectedCategory(e.target.value); setSelectedSubcategory('Todas');}}>
-                {categoriesList.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-3">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] flex items-center gap-2"><Target className="w-4 h-4" /> Especialidad</span>
-              <select className="w-full p-6 bg-slate-50 border-2 border-transparent focus:border-yellow-400 outline-none font-bold uppercase tracking-widest shadow-inner cursor-pointer disabled:opacity-30" value={selectedSubcategory} onChange={(e) => setSelectedSubcategory(e.target.value)} disabled={selectedCategory === 'Todas'}>
-                {subcategoriesList.map(sub => <option key={sub} value={sub}>{sub}</option>)}
-              </select>
-            </div>
-          </div>
+          <select className="text-[9px] font-black uppercase tracking-widest p-1.5 bg-slate-50 outline-none cursor-pointer" value={selectedCategory} onChange={(e) => {setSelectedCategory(e.target.value); setSelectedSubcategory('Todas');}}>
+            {categoriesList.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+          </select>
+          <select className="text-[9px] font-black uppercase tracking-widest p-1.5 bg-slate-50 outline-none cursor-pointer disabled:opacity-30" value={selectedSubcategory} onChange={(e) => setSelectedSubcategory(e.target.value)} disabled={selectedCategory === 'Todas'}>
+            {subcategoriesList.map(sub => <option key={sub} value={sub}>{sub}</option>)}
+          </select>
         </section>
 
         {/* --- LISTADO DE CARDS --- */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((c, i) => (
-            <div key={i} onClick={() => setSelectedCompany(c)} className="bg-white border border-slate-100 p-12 hover:shadow-2xl transition-all cursor-pointer border-t-[8px] hover:border-t-yellow-400 group relative shadow-lg overflow-hidden flex flex-col justify-between min-h-[380px]">
+            <div key={i} onClick={() => setSelectedCompany(c)} className="bg-white border border-slate-100 p-5 hover:shadow-lg transition-all cursor-pointer border-t-[3px] hover:border-t-yellow-400 group flex flex-col justify-between min-h-[160px] shadow-sm overflow-hidden">
               <div>
-                <div className="flex justify-between items-start mb-10">
-                   <span className="text-[10px] font-black bg-black text-white px-3 py-1 uppercase tracking-widest">{c['CATEGORÍA'] || 'CORPORACIÓN'}</span>
-                   <span className="text-yellow-600 font-black text-[10px] italic bg-yellow-50 px-3 py-1 rounded-sm border border-yellow-100 shadow-sm">{c['EJERCICIO']}</span>
+                <div className="flex justify-between items-start mb-3">
+                   <span className="text-[7px] font-black bg-black text-white px-2 py-0.5 uppercase tracking-widest italic">{c['CATEGORÍA'] || 'EMPRESA'}</span>
+                   <span className="text-yellow-600 font-bold text-[8px] italic">{c['EJERCICIO']}</span>
                 </div>
-                <h3 className="text-3xl font-black text-black group-hover:text-yellow-600 transition-colors uppercase leading-[1.1] mb-6 tracking-tighter">
+                <h3 className="text-sm font-black text-black group-hover:text-yellow-600 transition-colors uppercase leading-tight truncate mb-1 tracking-tight">
                   {c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}
                 </h3>
-                <p className="text-slate-400 text-[12px] font-mono mb-12 flex items-center gap-2 border-b border-slate-50 pb-6 uppercase italic tracking-[0.1em]">
-                  CIF: {c['CIF EMPRESA']}
-                </p>
+                <p className="text-slate-300 text-[8px] font-mono uppercase tracking-tighter italic">ID: {c['CIF EMPRESA']}</p>
               </div>
-              <div className="flex justify-between items-baseline pt-6">
-                <span className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] italic">Ventas Netas</span>
-                <span className="font-black text-4xl tabular-nums tracking-tighter shrink-0 group-hover:scale-105 transition-transform duration-500">
-                  {formatCurrency(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}
+              <div className="flex justify-between items-baseline pt-3 border-t border-slate-50">
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest italic">Ventas (k€)</span>
+                <span className="font-black text-lg tabular-nums tracking-tighter text-slate-900">
+                  {formatK(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}
                 </span>
               </div>
             </div>
@@ -329,227 +305,130 @@ export default function App() {
         </div>
       </main>
 
-      {/* --- FICHA ESTRATÉGICA (MODAL) --- */}
+      {/* --- FICHA ESTRATÉGICA (MODAL COMPACTO) --- */}
       {selectedCompany && (
-        <div className="fixed inset-0 bg-black/98 backdrop-blur-3xl z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-7xl my-auto shadow-2xl border-t-[20px] border-yellow-400 animate-in fade-in zoom-in duration-500 rounded-sm">
-            <div className="p-8 md:p-24 text-slate-900">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white w-full max-w-4xl my-auto shadow-2xl border-t-[8px] border-yellow-400 animate-in zoom-in duration-300 rounded-sm">
+            <div className="p-6 md:p-10 text-slate-900">
               
-              {/* CABECERA EXPEDIENTE */}
-              <div className="flex justify-between items-start mb-24 gap-12">
-                <div className="flex-1">
-                  <div className="flex items-center gap-5 mb-10">
-                    <span className="bg-black text-yellow-400 text-[12px] font-black px-6 py-2 uppercase tracking-[0.5em] shadow-2xl italic">REPORT ESTRATÉGICO M&A</span>
-                    <Activity className="w-8 h-8 text-yellow-500 animate-pulse" />
-                  </div>
-                  <h2 className="text-6xl md:text-9xl font-black tracking-tighter uppercase leading-[0.85] mb-12 italic drop-shadow-sm truncate max-w-full">
+              <div className="flex justify-between items-start mb-8 gap-6">
+                <div className="flex-1 overflow-hidden">
+                  <span className="bg-black text-yellow-400 text-[8px] font-black px-2 py-0.5 uppercase tracking-[0.3em] italic mb-4 inline-block shadow-sm">REPORT ESTRATÉGICO M&A</span>
+                  <h2 className="text-3xl md:text-4xl font-black tracking-tighter uppercase italic leading-none mb-6 truncate text-black">
                     {selectedCompany['ACRONIMO'] || selectedCompany['DENOMINACIÓN SOCIAL']}
                   </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-16 text-slate-500 font-mono text-[10px] border-l-[15px] border-black pl-16 uppercase py-4">
-                    <div className="flex flex-col"><span className="text-black font-black mb-2 tracking-[0.2em]">Entidad Legal</span><span className="font-bold text-sm text-slate-800 leading-tight">{selectedCompany['DENOMINACIÓN SOCIAL']}</span></div>
-                    <div className="flex flex-col"><span className="text-black font-black mb-2 tracking-[0.2em]">Identificador</span><span className="text-black font-black text-3xl tabular-nums tracking-widest">{selectedCompany['CIF EMPRESA']}</span></div>
-                    <div className="flex flex-col"><span className="text-black font-black mb-2 tracking-[0.2em]">Ecosistema</span><span className="text-yellow-600 font-black text-3xl italic tracking-tighter">{selectedCompany['CATEGORÍA']}</span></div>
-                    <div className="flex flex-col"><span className="text-black font-black mb-2 tracking-[0.2em]">Auditoría</span><span className="text-black font-black text-3xl italic tabular-nums">{selectedCompany['EJERCICIO']}</span></div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-slate-400 font-mono text-[8px] border-l-2 border-black pl-6 uppercase">
+                    <div className="flex flex-col"><span className="text-black font-black mb-0.5 italic">Legal Name</span><span className="font-bold truncate">{selectedCompany['DENOMINACIÓN SOCIAL']}</span></div>
+                    <div className="flex flex-col"><span className="text-black font-black mb-0.5 italic">ID Fiscal</span><span className="text-black font-black text-base tabular-nums">{selectedCompany['CIF EMPRESA']}</span></div>
+                    <div className="flex flex-col"><span className="text-black font-black mb-0.5 italic text-yellow-600">Sector</span><span className="text-yellow-600 font-black text-base italic">{selectedCompany['CATEGORÍA']}</span></div>
+                    <div className="flex flex-col"><span className="text-black font-black mb-0.5 italic">Ejercicio</span><span className="text-black font-black text-base">{selectedCompany['EJERCICIO']}</span></div>
                   </div>
                 </div>
-                <button onClick={() => setSelectedCompany(null)} className="p-10 border-4 border-slate-100 rounded-full hover:bg-slate-100 transition-all text-black hover:rotate-90 shadow-2xl bg-white sticky top-0"><X className="w-16 h-16" /></button>
+                <button onClick={() => setSelectedCompany(null)} className="p-3 border-2 border-slate-100 rounded-full hover:bg-slate-100 text-black shadow-sm"><X className="w-6 h-6" /></button>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-24">
-                {/* COLUMNA IZQUIERDA: P&L Y BALANCE */}
-                <div className="lg:col-span-8 space-y-24">
-                  
-                  {/* KPI BOXES */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-                    <div className="bg-slate-50 p-12 border-b-[12px] border-black shadow-xl rounded-sm">
-                      <span className="text-[11px] font-black uppercase text-slate-400 block mb-6 tracking-widest">Facturación</span>
-                      <span className="text-4xl font-black tabular-nums tracking-tighter block truncate italic">
-                        {formatCurrency(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}
-                      </span>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-10">
+                {/* FINANZAS k€ */}
+                <div className="lg:col-span-8 space-y-10">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-slate-50 p-4 border-b-4 border-black">
+                      <span className="text-[8px] font-black uppercase text-slate-400 block mb-1">Ventas</span>
+                      <span className="text-lg font-black tabular-nums tracking-tighter whitespace-nowrap">{formatK(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}</span>
                     </div>
-                    <div className="bg-slate-50 p-12 border-b-[12px] border-yellow-400 shadow-xl rounded-sm">
-                      <span className="text-[11px] font-black uppercase text-slate-400 block mb-6 tracking-widest">EBITDA</span>
-                      <span className="text-4xl font-black tabular-nums tracking-tighter text-yellow-600 block truncate italic">
-                        {formatCurrency(selectedCompany['EBITDA'])}
-                      </span>
+                    <div className="bg-slate-50 p-4 border-b-4 border-yellow-400">
+                      <span className="text-[8px] font-black uppercase text-slate-400 block mb-1">EBITDA</span>
+                      <span className="text-lg font-black tabular-nums tracking-tighter text-yellow-600 whitespace-nowrap">{formatK(selectedCompany['EBITDA'])}</span>
                     </div>
-                    <div className="bg-slate-50 p-12 border-b-[12px] border-black shadow-xl rounded-sm">
-                      <span className="text-[11px] font-black uppercase text-slate-400 block mb-6 tracking-widest">M. EBITDA</span>
-                      <span className="text-4xl font-black tabular-nums tracking-tighter block italic underline decoration-yellow-400">
+                    <div className="bg-slate-50 p-4 border-b-4 border-black text-center">
+                      <span className="text-[8px] font-black uppercase text-slate-400 block mb-1 italic">Margen %</span>
+                      <span className="text-lg font-black tabular-nums tracking-tighter">
                         {((cleanValue(selectedCompany['EBITDA']) / (cleanValue(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO']) || 1)) * 100).toFixed(1)}%
                       </span>
                     </div>
-                    <div className="bg-black text-white p-12 border-b-[12px] border-yellow-400 shadow-2xl rounded-sm overflow-hidden">
-                      <span className="text-[11px] font-black uppercase text-slate-400 block mb-6 tracking-widest">Resultado</span>
-                      <span className="text-4xl font-black tabular-nums tracking-tighter text-yellow-400 block truncate">
-                        {formatCurrency(selectedCompany['RESULTADO DEL EJERCICIO'])}
-                      </span>
+                    <div className="bg-black text-white p-4 border-b-4 border-yellow-400">
+                      <span className="text-[8px] font-black uppercase text-slate-500 block mb-1 italic">Neto Final</span>
+                      <span className="text-lg font-black tabular-nums text-yellow-400 tracking-tighter whitespace-nowrap">{formatK(selectedCompany['RESULTADO DEL EJERCICIO'])}</span>
                     </div>
                   </div>
 
-                  {/* CASCADA P&L */}
-                  <div className="space-y-12">
-                    <h4 className="text-4xl font-black uppercase border-b-[15px] border-black pb-6 flex justify-between items-end italic">
-                      <span>Análisis de Explotación Consolidada</span>
-                      <span className="text-[12px] text-slate-400 tracking-[0.6em] font-bold uppercase">EUR</span>
-                    </h4>
-                    <div className="space-y-6 font-bold text-lg">
-                      <div className="flex justify-between p-10 bg-slate-900 text-white rounded-sm shadow-2xl items-center border-l-[20px] border-yellow-400 group">
-                        <span className="uppercase tracking-[0.4em] italic flex items-center gap-6 text-xs font-black">
-                          <ArrowUpRight className="w-8 h-8 text-yellow-400" /> (+) Ingresos Totales Explotación
-                        </span>
-                        <span className="text-5xl font-black tabular-nums tracking-tighter italic shrink-0">
-                          {formatCurrency(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}
-                        </span>
+                  <div className="space-y-6">
+                    <h4 className="text-lg font-black uppercase border-b-2 border-black pb-1.5 italic text-black">Cuenta de Resultados (k€)</h4>
+                    <div className="space-y-1.5 text-[10px] font-bold">
+                      <div className="flex justify-between p-3 bg-slate-900 text-white rounded-sm border-l-8 border-yellow-400">
+                        <span className="uppercase tracking-widest italic flex items-center gap-2"><ArrowUpRight className="w-3 h-3 text-yellow-400" /> (+) Ingresos Explotación</span>
+                        <span className="text-base font-black tabular-nums italic">{formatK(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}</span>
                       </div>
-                      <div className="flex justify-between px-12 py-8 text-red-600 border-b-4 border-slate-100 italic hover:bg-red-50/20 transition-all">
-                        <span className="uppercase text-[14px] tracking-[0.3em] font-black">(-) Costes Directos / Aprovisionamientos</span>
-                        <span className="tabular-nums font-black text-3xl tracking-tighter">{formatCurrency(selectedCompany['APROVISIONAMIENTOS'])}</span>
+                      <div className="flex justify-between px-4 py-2 text-red-600 border-b border-slate-50 italic">
+                        <span className="uppercase tracking-[0.1em]">(-) Gastos de Personal</span>
+                        <span className="tabular-nums font-black">{formatK(selectedCompany['GASTOS DE PERSONAL'])}</span>
                       </div>
-                      <div className="flex justify-between px-12 py-8 text-red-600 border-b-4 border-slate-100 italic hover:bg-red-50/20 transition-all">
-                        <span className="uppercase text-[14px] tracking-[0.3em] font-black">(-) Estructura Salarial (Talent Cost)</span>
-                        <span className="tabular-nums font-black text-3xl tracking-tighter">{formatCurrency(selectedCompany['GASTOS DE PERSONAL'])}</span>
+                      <div className="flex justify-between px-4 py-2 text-red-600 border-b border-slate-50 italic">
+                        <span className="uppercase tracking-[0.1em]">(-) Otros Gastos Operativos</span>
+                        <span className="tabular-nums font-black">{formatK(selectedCompany['OTROS GASTOS DE EXPLOTACION'])}</span>
                       </div>
-                      <div className="flex justify-between px-12 py-8 text-red-600 border-b-[12px] border-black italic hover:bg-red-50/20 transition-all">
-                        <span className="uppercase text-[14px] tracking-[0.3em] font-black">(-) Otros Gastos de Operación</span>
-                        <span className="tabular-nums font-black text-3xl tracking-tighter">{formatCurrency(selectedCompany['OTROS GASTOS DE EXPLOTACION'])}</span>
-                      </div>
-                      <div className="flex justify-between p-16 bg-yellow-400/10 border-x-[30px] border-yellow-400 my-16 shadow-inner items-center">
-                        <div className="flex flex-col">
-                          <span className="font-black text-5xl uppercase tracking-tighter italic leading-none">(=) EBITDA Operativo</span>
-                          <span className="text-[12px] uppercase font-bold text-slate-500 tracking-[0.3em] mt-5 italic">Caja operativa generada por el negocio</span>
-                        </div>
-                        <span className="text-8xl font-black text-yellow-600 tabular-nums tracking-tighter shrink-0">{formatCurrency(selectedCompany['EBITDA'])}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* BALANCE */}
-                  <div className="space-y-12">
-                    <h4 className="text-4xl font-black uppercase border-b-[15px] border-black pb-6 italic">Balance y Estructura de Capital</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-20">
-                      <div className="space-y-8">
-                        <span className="text-[12px] font-black uppercase text-slate-400 tracking-[0.5em] flex items-center gap-4 italic"><Wallet className="w-6 h-6 text-black" /> Composición Activo</span>
-                        <div className="bg-slate-50 p-12 space-y-10 rounded-sm border-2 border-slate-100 shadow-xl">
-                          <div className="flex justify-between border-b-4 border-slate-100 pb-6"><span className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 italic">Activo Circulante</span><span className="font-black text-3xl tabular-nums tracking-tighter">{formatCurrency(selectedCompany['ACTIVO CORRIENTE'])}</span></div>
-                          <div className="flex justify-between border-b-4 border-slate-100 pb-6"><span className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 italic">Inmovilizado</span><span className="font-black text-3xl tabular-nums tracking-tighter">{formatCurrency(selectedCompany['ACTIVO NO CORRIENTE'])}</span></div>
-                        </div>
-                      </div>
-                      <div className="space-y-8">
-                        <span className="text-[12px] font-black uppercase text-slate-400 tracking-[0.5em] flex items-center gap-4 italic"><ShieldCheck className="w-6 h-6 text-yellow-500" /> Fondos y Pasivos</span>
-                        <div className="bg-slate-50 p-12 space-y-10 rounded-sm border-2 border-slate-100 shadow-xl">
-                          <div className="flex justify-between border-b-4 border-slate-100 pb-6"><span className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 italic">Deuda Total</span><span className="font-black text-3xl tabular-nums tracking-tighter">{formatCurrency(cleanValue(selectedCompany['PASIVO CORRIENTE']) + cleanValue(selectedCompany['PASIVO NO CORRIENTE']))}</span></div>
-                          <div className="flex justify-between border-b-4 border-yellow-400 pb-6 bg-yellow-400/5 px-4 -mx-4"><span className="text-xs font-black uppercase tracking-[0.2em] text-yellow-700 italic">Patrimonio Neto</span><span className="font-black text-3xl tabular-nums text-yellow-700 tracking-tighter">{formatCurrency(selectedCompany['PATRIMONIO NETO'])}</span></div>
-                        </div>
+                      <div className="flex justify-between p-4 bg-yellow-400/5 border-x-4 border-yellow-400 shadow-inner items-center">
+                        <span className="font-black text-sm uppercase italic tracking-tighter">(=) EBITDA Operativo</span>
+                        <span className="text-2xl font-black text-yellow-600 tabular-nums tracking-tighter italic">{formatK(selectedCompany['EBITDA'])}</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* COLUMNA DERECHA */}
-                <div className="lg:col-span-4 space-y-20">
-                  {/* EFICIENCIA TALENTO */}
-                  <div className="bg-black text-white p-16 border-l-[25px] border-yellow-400 shadow-2xl relative overflow-hidden group rounded-sm">
-                    <Calculator className="absolute -right-16 -bottom-16 w-96 h-96 text-white/5 group-hover:scale-125 transition-all duration-1000 rotate-12" />
-                    <h5 className="text-[12px] font-black uppercase tracking-[0.6em] text-yellow-400 mb-20 flex items-center gap-5 italic underline underline-offset-8 decoration-4">
-                       <BarChart3 className="w-6 h-6" /> Human Capital Index
+                {/* COLUMNA DERECHA RATIOS */}
+                <div className="lg:col-span-4 space-y-8">
+                  <div className="bg-black text-white p-6 border-l-[8px] border-yellow-400 shadow-md relative overflow-hidden group">
+                    <h5 className="text-[9px] font-black uppercase tracking-widest text-yellow-400 mb-6 flex items-center gap-2 italic">
+                       <BarChart3 className="w-3 h-3" /> Talent Index
                     </h5>
-                    <div className="space-y-20 relative z-10">
-                      <div className="border-l-4 border-white/20 pl-12 group">
-                        <span className="text-8xl font-black block leading-none mb-6 tracking-tighter italic tabular-nums group-hover:text-yellow-400 transition-colors">
+                    <div className="space-y-6 relative z-10 font-black">
+                      <div className="border-l border-white/20 pl-4">
+                        <span className="text-4xl block leading-none mb-1 tracking-tighter italic tabular-nums text-white">
                           {((Math.abs(cleanValue(selectedCompany['GASTOS DE PERSONAL'])) / (cleanValue(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO']) || 1)) * 100).toFixed(1)}%
                         </span>
-                        <span className="text-[12px] uppercase font-black text-slate-400 tracking-[0.5em] block">Ratio Salarial s/ Ventas</span>
+                        <span className="text-[8px] uppercase text-slate-500 tracking-[0.2em] block">Peso Salarial s/ Ventas</span>
                       </div>
-                      <div className="border-l-4 border-yellow-400/40 pl-12">
-                        <span className="text-5xl font-black block leading-none mb-6 tracking-tighter text-yellow-400 italic tabular-nums">
-                          {formatCurrency(cleanValue(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO']) / (Math.abs(cleanValue(selectedCompany['GASTOS DE PERSONAL'])) || 1))}
+                      <div className="border-l border-yellow-400/30 pl-4">
+                        <span className="text-2xl block leading-none mb-1 tracking-tighter text-yellow-400 italic tabular-nums">
+                          {((cleanValue(selectedCompany['IMPORTE NETO DE LA CIFRA DE NEGOCIO']) / (Math.abs(cleanValue(selectedCompany['GASTOS DE PERSONAL'])) || 1))).toFixed(2)}€
                         </span>
-                        <span className="text-[12px] uppercase font-black text-slate-400 tracking-[0.5em] block italic">Efficiency per Talent Euro</span>
+                        <span className="text-[8px] uppercase text-slate-500 tracking-[0.2em] block">Retorno por € Invertido</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* ACTIVIDAD REGISTRADA */}
-                  <div className="bg-[#F8F9FA] p-16 border-l-[25px] border-slate-200 shadow-2xl rounded-sm group">
-                    <h5 className="text-[12px] font-black uppercase tracking-[0.6em] text-slate-400 mb-16 flex items-center gap-5">
-                       <Briefcase className="w-7 h-7 text-slate-400" /> Visión de Registro
-                    </h5>
-                    <p className="text-3xl leading-relaxed italic font-serif text-slate-800 font-medium group-hover:text-black transition-colors">
-                      "{String(selectedCompany['OBJETO SOCIAL'] || 'Descripción comercial no disponible.')}"
+                  <div className="bg-[#FBFBFB] p-6 border-l-[8px] border-slate-100 shadow-sm">
+                    <h5 className="text-[8px] font-black uppercase tracking-[0.3em] text-slate-400 mb-4 flex items-center gap-2 italic"><Briefcase className="w-3 h-3" /> Registro de Actividad</h5>
+                    <p className="text-[10px] leading-relaxed italic font-serif text-slate-600">
+                      "{String(selectedCompany['OBJETO SOCIAL'] || 'Descripción de actividad comercial no disponible.')}"
                     </p>
-                    <div className="mt-20 pt-14 border-t-4 border-slate-200 flex flex-col gap-10">
-                      <div className="flex items-center gap-6 text-slate-400 group cursor-pointer hover:text-black transition-all">
-                        <Globe className="w-8 h-8 group-hover:text-yellow-500" />
-                        <span className="text-[12px] font-black uppercase tracking-[0.4em] truncate">{selectedCompany['URL'] || 'WEBSITE_PENDING'}</span>
-                      </div>
-                      <div className="flex items-center gap-6 text-slate-300 italic">
-                        <Database className="w-8 h-8" />
-                        <span className="text-[12px] font-black uppercase tracking-[0.4em]">CNAE: {selectedCompany['CODIGO CNAE']}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ACCIONES */}
-                  <div className="grid grid-cols-2 gap-8">
-                    <button className="bg-black text-white p-12 font-black uppercase text-[11px] tracking-[0.4em] hover:bg-yellow-400 hover:text-black transition-all shadow-2xl flex flex-col items-center gap-6 group">
-                      <ArrowUpRight className="w-10 h-10 group-hover:rotate-45 transition-transform" /> Export M&A
-                    </button>
-                    <button className="border-4 border-black p-12 font-black uppercase text-[11px] tracking-[0.4em] hover:bg-black hover:text-white transition-all shadow-2xl flex flex-col items-center gap-6">
-                      <TrendingDown className="w-10 h-10" /> Benchmarking
-                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* SECCIÓN: COMPAÑÍAS SIMILARES (PEER ANALYSIS) */}
-              <div className="mt-40 pt-24 border-t-8 border-slate-50">
-                <div className="flex items-center gap-6 mb-16">
-                  <Layers className="w-10 h-10 text-yellow-500" />
-                  <h4 className="text-5xl font-black uppercase tracking-tighter italic">Peer Analysis: Compañías Similares</h4>
+              {/* SECCIÓN PEER ANALYSIS */}
+              <div className="pt-8 border-t-2 border-slate-50">
+                <div className="flex items-center gap-2 mb-6">
+                  <Layers className="w-4 h-4 text-yellow-500" />
+                  <h4 className="text-lg font-black uppercase tracking-tighter italic text-black">Peer Analysis: Compañías Similares</h4>
                 </div>
-                <div className="bg-slate-50 p-6 mb-12 flex items-center gap-4 border-l-8 border-yellow-400 shadow-sm">
-                   <Info className="w-5 h-5 text-yellow-600" />
-                   <p className="text-slate-500 text-[11px] font-black uppercase tracking-[0.3em]">Criterio de Similitud: Proximidad de Facturación (+/- 25%) y afinidad de Sector en Ejercicio {selectedCompany['EJERCICIO']}</p>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {similarCompanies.map((c, i) => (
-                    <div 
-                      key={i} 
-                      onClick={() => { setSelectedCompany(c); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                      className="bg-white p-10 border-2 border-slate-100 hover:border-yellow-400 hover:shadow-2xl transition-all cursor-pointer group flex flex-col justify-between min-h-[300px] shadow-lg rounded-sm"
-                    >
+                    <div key={i} onClick={() => { setSelectedCompany(c); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="bg-white border border-slate-100 p-4 hover:border-yellow-400 hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between min-h-[110px]">
                       <div>
-                        <div className="flex justify-between items-start mb-8">
-                           <span className="text-[10px] font-black bg-black text-white px-3 py-1 uppercase tracking-widest italic">{c['CATEGORÍA']}</span>
-                           <Zap className="w-5 h-5 text-yellow-400 opacity-0 group-hover:opacity-100 transition-all duration-500 group-hover:scale-110" />
-                        </div>
-                        <h5 className="font-black uppercase text-xl leading-tight mb-4 group-hover:text-yellow-600 transition-colors truncate">{c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}</h5>
-                        <p className="text-slate-400 text-[10px] font-mono italic tracking-[0.2em]">{c['CIF EMPRESA']}</p>
+                        <span className="text-[6px] font-black bg-black text-white px-1.5 py-0.5 uppercase tracking-widest mb-2 inline-block">{c['CATEGORÍA']}</span>
+                        <h5 className="font-black uppercase text-[10px] leading-tight group-hover:text-yellow-600 truncate">{c['ACRONIMO'] || c['DENOMINACIÓN SOCIAL']}</h5>
                       </div>
-                      <div className="border-t-2 border-slate-50 pt-8 mt-4">
-                         <span className="text-[10px] font-black text-slate-500 uppercase block mb-2 italic">Volumen Negocio</span>
-                         <span className="font-black text-2xl tabular-nums tracking-tighter text-slate-900 group-hover:text-black">{formatCurrency(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}</span>
+                      <div className="border-t border-slate-50 mt-3 pt-2">
+                         <span className="text-[7px] font-black text-slate-400 uppercase block mb-0.5 italic">Ventas</span>
+                         <span className="font-black text-sm tabular-nums tracking-tighter text-slate-900 group-hover:text-black">{formatK(c['IMPORTE NETO DE LA CIFRA DE NEGOCIO'])}</span>
                       </div>
                     </div>
                   ))}
-                  {similarCompanies.length === 0 && (
-                    <div className="col-span-full py-20 bg-slate-50 border-4 border-dashed border-slate-200 text-center rounded-lg">
-                      <span className="text-slate-300 font-black uppercase tracking-[0.4em] text-xl italic">No hay suficientes pares comparables</span>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* CIERRE DE FICHA */}
-              <div className="mt-40 flex justify-center pb-32">
-                <button 
-                  onClick={() => setSelectedCompany(null)} 
-                  className="bg-black text-white px-80 py-14 font-black uppercase tracking-[0.9em] text-sm hover:bg-yellow-400 hover:text-black transition-all shadow-2xl active:scale-95 border-b-[25px] border-yellow-600 rounded-sm"
-                >
-                  Cerrar Expediente Estratégico
-                </button>
+              <div className="mt-12 flex justify-center pb-6">
+                <button onClick={() => setSelectedCompany(null)} className="bg-black text-white px-10 py-4 font-black uppercase tracking-[0.5em] text-[10px] hover:bg-yellow-400 hover:text-black transition-all shadow-xl active:scale-95 border-b-4 border-yellow-600 rounded-sm">Cerrar Expediente</button>
               </div>
             </div>
           </div>
